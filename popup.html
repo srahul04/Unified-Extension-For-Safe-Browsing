@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Security Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            width: 380px;
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* Tailwind slate-50 */
+            color: #1e293b; /* Tailwind slate-800 */
+        }
+        .container {
+            padding: 1rem;
+        }
+        .section-title {
+            font-weight: 600; /* Tailwind font-semibold */
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+            color: #0f172a; /* Tailwind slate-900 */
+            border-bottom: 1px solid #e2e8f0; /* Tailwind slate-200 */
+            padding-bottom: 0.25rem;
+        }
+        .result-item {
+            display: flex;
+            align-items: flex-start; /* Align text to top if it wraps */
+            margin-bottom: 0.25rem;
+            padding: 0.25rem 0;
+            font-size: 0.9rem;
+        }
+        .icon {
+            width: 1.25rem;
+            height: 1.25rem;
+            min-width: 1.25rem; /* Ensure icon doesn't shrink */
+            margin-right: 0.5rem;
+            line-height: 1.25rem; /* Center icon vertically */
+            text-align: center;
+        }
+        .success-icon {
+            color: #10b981; /* Tailwind emerald-500 */
+        }
+        .warning-icon {
+            color: #f59e0b; /* Tailwind amber-500 */
+        }
+        .error-icon {
+            color: #ef4444; /* Tailwind red-500 */
+        }
+        .info-icon {
+            color: #3b82f6; /* Tailwind blue-500 */
+        }
+        .tip-box {
+            background-color: #ecfdf5; /* Tailwind emerald-50 */
+            border-left: 4px solid #10b981; /* Tailwind emerald-500 */
+            padding: 0.75rem;
+            border-radius: 0.5rem; /* Tailwind rounded-lg */
+            margin-top: 1rem;
+            font-size: 0.875rem; /* Tailwind text-sm */
+            color: #065f46; /* Tailwind emerald-900 */
+        }
+        .tip-box ul {
+            list-style: disc;
+            margin-left: 1.25rem;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            margin: 1rem auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .llm-output {
+            background-color: #e0f2fe; /* Tailwind light blue */
+            border-left: 4px solid #3b82f6; /* Tailwind blue-500 */
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+            color: #1e40af; /* Tailwind blue-800 */
+            white-space: pre-wrap; /* Preserve whitespace and line breaks */
+            word-wrap: break-word; /* Break long words */
+        }
+        .llm-loading-text, .pdf-loading-text {
+            text-align: center;
+            font-style: italic;
+            color: #64748b; /* Tailwind slate-500 */
+            margin-top: 1rem;
+        }
+
+        /* New Scanning UI Styles */
+        .scanning-ui {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            background-color: #1a202c; /* Dark background */
+            border-radius: 0.75rem;
+            margin-top: 1rem;
+            color: #e2e8f0; /* Light text */
+            height: 250px; /* Fixed height for scanning animation */
+        }
+        .scanning-animation {
+            width: 80px;
+            height: 80px;
+            border: 8px solid #4a5568; /* Gray border */
+            border-top: 8px solid #667eea; /* Blue top border */
+            border-radius: 50%;
+            animation: spin 1.5s linear infinite;
+            margin-bottom: 1rem;
+        }
+        .scanning-text {
+            font-size: 1.1rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+        .scanning-progress {
+            font-size: 0.9rem;
+            color: #a0aec0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-xl font-bold text-center mb-4 text-indigo-700">Web Security Analyzer</h1>
+
+        <div id="loading" class="loading-spinner"></div>
+
+        <div id="scanning-ui" class="scanning-ui hidden">
+            <div class="scanning-animation"></div>
+            <div class="scanning-text">Analyzing Website Security...</div>
+            <div id="scanning-progress" class="scanning-progress">Initializing scan...</div>
+        </div>
+
+        <div id="results" class="hidden">
+            <div class="section-title">General Security Checks</div>
+            <div id="https-check" class="result-item"></div>
+            <div id="mixed-content-check" class="result-item"></div>
+            <div id="csp-check" class="result-item"></div>
+            <div id="x-frame-options-check" class="result-item"></div>
+            <div id="hsts-check" class="result-item"></div>
+            <div id="x-content-type-options-check" class="result-item"></div>
+            <div id="x-xss-protection-check" class="result-item"></div>
+            <div id="referrer-policy-check" class="result-item"></div>
+            <div id="permissions-policy-check" class="result-item"></div>
+            <div id="coop-check" class="result-item"></div>
+            <div id="corp-check" class="result-item"></div>
+
+            <div class="section-title">Cookie Security</div>
+            <div id="cookie-results"></div>
+
+            <div class="section-title">Form Security</div>
+            <div id="form-autocomplete-check" class="result-item"></div>
+            <div id="password-type-check" class="result-item"></div>
+            <div id="password-encryption-note" class="result-item"></div>
+
+
+            <div class="section-title">Potential Malware Indicators</div>
+            <div id="suspicious-scripts-check" class="result-item"></div>
+            <div id="form-cross-origin-check" class="result-item"></div>
+            <div id="obfuscated-js-check" class="result-item"></div>
+
+            <div class="section-title">Traffic Analysis</div>
+            <div id="total-requests-check" class="result-item"></div>
+            <div id="external-requests-check" class="result-item"></div>
+            <div id="large-resources-check" class="result-item"></div>
+
+            <div class="section-title">General Security Tips for Web Apps</div>
+            <div class="tip-box">
+                <ul>
+                    <li>Always use HTTPS to encrypt communication.</li>
+                    <li>Implement a strong Content Security Policy (CSP).</li>
+                    <li>Protect against CSRF with anti-CSRF tokens.</li>
+                    <li>Use `HttpOnly` and `Secure` flags for all sensitive cookies.</li>
+                    <li>Set `X-Frame-Options` or `Content-Security-Policy: frame-ancestors` to prevent clickjacking.</li>
+                    <li>Implement `Strict-Transport-Security (HSTS)` for HTTPS enforcement.</li>
+                    <li>Use `X-Content-Type-Options: nosniff` to prevent MIME-sniffing attacks.</li>
+                    <li>Sanitize and validate all user inputs to prevent XSS and SQL Injection.</li>
+                    <li>Regularly update all frameworks and dependencies.</li>
+                    <li>Disable `DEBUG` mode and ensure `SECRET_KEY` is secure in production.</li>
+                    <li>Implement `Permissions-Policy` to control browser features.</li>
+                    <li>Consider `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` for isolation.</li>
+                    <li>Regularly review third-party scripts and external resources.</li>
+                    <li>Be cautious of forms submitting to different domains.</li>
+                    <li>Optimize resource loading to prevent high traffic and improve performance.</li>
+                    <li>**Always encrypt and hash passwords securely on the server-side.**</li>
+                </ul>
+            </div>
+
+            <div class="section-title">AI-Powered Analysis ✨</div>
+            <div id="llm-output-loading" class="llm-loading-text hidden">Generating response...</div>
+            <div id="llm-output" class="llm-output hidden"></div>
+
+            <div class="section-title">Report Generation</div>
+            <div id="pdf-loading-text" class="pdf-loading-text hidden">Generating PDF...</div>
+        </div>
+    </div>
+    <!-- jsPDF library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="popup.js"></script>
+</body>
+</html>
