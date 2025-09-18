@@ -6,16 +6,19 @@
     "action": {
         "default_popup": "popup.html",
         "default_icon": {
-            "1": "icons/icon1.png",
-            "2": "icons/icon2.png",
-            "3": "icons/icon3.png"
+            "16": "icons/icon1.png",
+            "48": "icons/icon2.png",
+            "128": "icons/icon3.png"
         }
     },
     "permissions": [
         "activeTab",
+        "tabs",
         "scripting",
         "webRequest",
-        "webNavigation"
+        "webNavigation",
+        "notifications",
+        "storage"
     ],
     "host_permissions": [
         "<all_urls>"
@@ -24,8 +27,8 @@
         "service_worker": "background.js"
     },
     "icons": {
-        "1": "icons/icon1.png",
-        "2": "icons/icon2.png",
-        "3": "icons/icon3.png"
+        "16": "icons/icon1.png",
+        "48": "icons/icon2.png",
+        "128": "icons/icon3.png"
     }
 }
