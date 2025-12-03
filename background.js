@@ -1,309 +1,608 @@
-const headerDataStore = {}; // Store header data keyed by tabId
-// Store security history for real-time monitoring
-let securityHistory = {};
+// Background service worker for handling web requests and API calls
+// Enhanced with comprehensive security analysis capabilities
 
-chrome.webRequest.onHeadersReceived.addListener(
-    function(details) {
-        // Only process the main document request for the current tab
-        if (details.type === "main_frame") {
-            const headers = {};
-            details.responseHeaders.forEach(header => {
-                headers[header.name.toLowerCase()] = header.value;
-            });
-            headerDataStore[details.tabId] = headers;
-            
-            // Store timestamp for this security check
-            if (!securityHistory[details.url]) {
-                securityHistory[details.url] = [];
-            }
-            
-            // Limit history to last 10 entries per URL
-            if (securityHistory[details.url].length >= 10) {
-                securityHistory[details.url].shift(); // Remove oldest entry
-            }
-            
-            // Add new entry with timestamp
-            securityHistory[details.url].push({
-                timestamp: new Date().toISOString(),
-                headers: headers
-            });
-        }
-    },
-    { urls: ["<all_urls>"], types: ["main_frame"] },
-    ["responseHeaders", "extraHeaders"] // Ensure access to all headers in MV3
+// Store headers from web requests
+const headersCache = new Map();
+
+// Listen for web request completion to capture headers
+chrome.webRequest.onCompleted.addListener(
+  (details) => {
+    if (details.responseHeaders) {
+      const headers = {};
+      details.responseHeaders.forEach(header => {
+        headers[header.name.toLowerCase()] = header.value;
+      });
+      headersCache.set(details.url, headers);
+
+      // Clean up old entries (keep only last 50)
+      if (headersCache.size > 50) {
+        const firstKey = headersCache.keys().next().value;
+        headersCache.delete(firstKey);
+      }
+    }
+  },
+  { urls: ["<all_urls>"] },
+  ["responseHeaders"]
 );
 
-// Listen for messages from popup.js to provide header data
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "getHeaders") {
-        const tabId = request.tabId;
-        const headers = headerDataStore[tabId] || {};
-        sendResponse(headers);
-        // Clear the stored headers after sending, as they are for a specific page load
-        delete headerDataStore[tabId];
-    } else if (request.action === "getSecurityHistory") {
-        sendResponse(securityHistory[request.url] || []);
-    } else if (request.action === "startMonitoring") {
-        // Acknowledge receipt of the message
-        sendResponse({status: "monitoring_acknowledged"});
-    } else if (request.action === "stopMonitoring") {
-        // Acknowledge receipt of the message
-        sendResponse({status: "monitoring_stopped"});
-    }
-    return true; // Keep the message channel open for async responses
-});
-
-// Clear data when a tab is closed or navigated away from
-chrome.tabs.onRemoved.addListener((tabId) => {
-    delete headerDataStore[tabId];
-});
-
-chrome.webNavigation.onCommitted.addListener((details) => {
-    if (details.frameId === 0) { // Main frame navigation
-        delete headerDataStore[details.tabId];
-    }
-});
-
-// Cleanup old history entries (older than 7 days)
-setInterval(() => {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
-    Object.keys(securityHistory).forEach(url => {
-        securityHistory[url] = securityHistory[url].filter(entry => {
-            return new Date(entry.timestamp) > sevenDaysAgo;
-        });
-        
-        // Remove empty history arrays
-        if (securityHistory[url].length === 0) {
-            delete securityHistory[url];
-        }
-    });
-}, 86400000); // Run once per day (24 hours in milliseconds)
-
-// Handle notification clicks
-chrome.notifications.onClicked.addListener((notificationId) => {
-    // Open the extension popup when notification is clicked
-    chrome.action.openPopup();
-});
-
-// Function to compare security headers and detect changes
-const detectSecurityChanges = (oldHeaders, newHeaders) => {
-    const securityHeaders = [
-        'content-security-policy',
-        'strict-transport-security',
-        'x-content-type-options',
-        'x-frame-options',
-        'x-xss-protection',
-        'referrer-policy',
-        'permissions-policy',
-        'cross-origin-opener-policy',
-        'cross-origin-resource-policy'
-    ];
-    
-    const changes = [];
-    
-    // Check for removed or changed security headers
-    securityHeaders.forEach(header => {
-        if (oldHeaders[header] && !newHeaders[header]) {
-            changes.push(`${header} header was removed`);
-        } else if (oldHeaders[header] && newHeaders[header] && oldHeaders[header] !== newHeaders[header]) {
-            changes.push(`${header} header was changed`);
-        }
-    });
-    
-    // Check for added security headers
-    securityHeaders.forEach(header => {
-        if (!oldHeaders[header] && newHeaders[header]) {
-            changes.push(`${header} header was added`);
-        }
-    });
-    
-    return changes;
+/**
+ * Security Headers Database
+ * Defines expected security headers and their importance
+ */
+const SECURITY_HEADERS = {
+  'strict-transport-security': {
+    name: 'HTTP Strict Transport Security (HSTS)',
+    severity: 'high',
+    description: 'Enforces HTTPS connections'
+  },
+  'content-security-policy': {
+    name: 'Content Security Policy (CSP)',
+    severity: 'high',
+    description: 'Prevents XSS and injection attacks'
+  },
+  'x-frame-options': {
+    name: 'X-Frame-Options',
+    severity: 'medium',
+    description: 'Prevents clickjacking attacks'
+  },
+  'x-content-type-options': {
+    name: 'X-Content-Type-Options',
+    severity: 'medium',
+    description: 'Prevents MIME-sniffing attacks'
+  },
+  'x-xss-protection': {
+    name: 'X-XSS-Protection',
+    severity: 'low',
+    description: 'Legacy XSS protection (deprecated but still useful)'
+  },
+  'referrer-policy': {
+    name: 'Referrer-Policy',
+    severity: 'medium',
+    description: 'Controls referrer information'
+  },
+  'permissions-policy': {
+    name: 'Permissions-Policy',
+    severity: 'medium',
+    description: 'Controls browser features and APIs'
+  }
 };
 
-// Setup periodic security checks for monitored tabs
-let monitoredTabs = {};
+/**
+ * Phishing Indicators Database
+ * Patterns and keywords commonly used in phishing attacks
+ */
+const PHISHING_INDICATORS = {
+  suspiciousKeywords: [
+    'verify', 'suspend', 'urgent', 'confirm', 'account', 'security',
+    'update', 'validate', 'click here', 'act now', 'limited time',
+    'unusual activity', 'locked', 'expired', 'winner', 'prize'
+  ],
+  suspiciousTLDs: [
+    '.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.work',
+    '.date', '.racing', '.download', '.stream', '.loan', '.win'
+  ],
+  urlPatterns: [
+    /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/, // IP addresses
+    /[a-z0-9-]{20,}/, // Very long subdomains
+    /@/, // @ symbol in URL (often used to hide real domain)
+    /\-{2,}/, // Multiple consecutive hyphens
+  ]
+};
 
-// Register a tab for monitoring
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === "registerTabForMonitoring") {
-        monitoredTabs[message.tabId] = {
-            url: message.url,
-            lastChecked: new Date().toISOString()
-        };
-        sendResponse({status: "tab_registered"});
-    } else if (message.action === "unregisterTabFromMonitoring") {
-        if (monitoredTabs[message.tabId]) {
-            delete monitoredTabs[message.tabId];
-        }
-        sendResponse({status: "tab_unregistered"});
-    } else if (message.action === "performSecurityCheck") {
-        performSecurityCheck(message.tabId, message.url, sendResponse);
-        return true; // Keep the message channel open for the async response
-    } else if (message.action === "getSecurityHistory") {
-        // Return security history for the specified URL
-        const history = securityHistory[message.url] || [];
-        sendResponse(history);
-    }
-    return true;
+/**
+ * Tracker and Fingerprinting Domains
+ * Common tracking and analytics services
+ */
+const TRACKER_DOMAINS = [
+  'google-analytics.com', 'googletagmanager.com', 'doubleclick.net',
+  'facebook.com/tr', 'connect.facebook.net', 'analytics.twitter.com',
+  'ads.linkedin.com', 'pixel.adsafeprotected.com', 'scorecardresearch.com',
+  'quantserve.com', 'hotjar.com', 'mouseflow.com', 'crazyegg.com',
+  'mixpanel.com', 'segment.com', 'amplitude.com', 'heap.io'
+];
+
+const FINGERPRINTING_SCRIPTS = [
+  'fingerprintjs', 'clientjs', 'creepjs', 'canvas', 'webgl',
+  'audiocontext', 'font-detect', 'evercookie'
+];
+
+/**
+ * Malware and Phishing Domains Database
+ */
+const knownMalwareDomains = [
+  'malware.com', 'phishing-site.net', 'virus-download.org',
+  'fake-update.com', 'suspicious-ads.net', 'scam-alert.org',
+  'fake-bank.com', 'phishing-paypal.net', 'secure-login-verify.com'
+];
+
+const adultContentDomains = [
+  'pornhub.com', 'xvideos.com', 'xnxx.com', 'redtube.com',
+  'youporn.com', 'tube8.com', 'spankbang.com', 'eporner.com'
+];
+
+/**
+ * Scan History Storage
+ * Stores recent scan results for comparison
+ */
+const MAX_HISTORY_SIZE = 50;
+
+/**
+ * Unified message handler for all runtime messages
+ */
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  switch (request.action) {
+    case 'getHeaders':
+      const headers = headersCache.get(request.url) || {};
+      sendResponse({ headers });
+      break;
+
+    case 'analyzeSecurityHeaders':
+      analyzeSecurityHeaders(request.url).then(result => {
+        sendResponse(result);
+      });
+      return true;
+
+    case 'checkCookieSecurity':
+      checkCookieSecurity(request.url).then(result => {
+        sendResponse(result);
+      });
+      return true;
+
+    case 'checkPhishing':
+      const phishingResult = checkPhishingIndicators(request.url);
+      sendResponse(phishingResult);
+      break;
+
+    case 'detectTrackers':
+      const trackerResult = detectTrackers(request.resources || []);
+      sendResponse(trackerResult);
+      break;
+
+    case 'incrementScanCount':
+      chrome.storage.local.get(['scanCount'], (result) => {
+        const newCount = (result.scanCount || 0) + 1;
+        chrome.storage.local.set({ scanCount: newCount });
+        sendResponse({ scanCount: newCount });
+      });
+      return true;
+
+    case 'saveScanResult':
+      saveScanResult(request.scanData).then(result => {
+        sendResponse(result);
+      });
+      return true;
+
+    case 'getScanHistory':
+      getScanHistory(request.limit || 10).then(history => {
+        sendResponse({ history });
+      });
+      return true;
+
+    case 'getNetworkStats':
+      const stats = networkStats.get(request.tabId) || {
+        requestCount: 0,
+        totalBytes: 0,
+        requestTypes: {},
+        startTime: Date.now()
+      };
+      sendResponse({ stats });
+      break;
+
+    case 'checkMalwareDomain':
+      try {
+        const url = new URL(request.url);
+        const isMalware = knownMalwareDomains.some(domain =>
+          url.hostname.includes(domain)
+        );
+        sendResponse({ isMalware, domain: url.hostname });
+      } catch (error) {
+        console.error('Error checking malware domain:', error);
+        sendResponse({ isMalware: false, domain: '', error: error.message });
+      }
+      break;
+
+    case 'checkAdultDomain':
+      try {
+        const url = new URL(request.url);
+        const isAdult = adultContentDomains.some(domain =>
+          url.hostname.includes(domain)
+        );
+        sendResponse({ isAdult, domain: url.hostname });
+      } catch (error) {
+        console.error('Error checking adult domain:', error);
+        sendResponse({ isAdult: false, domain: '', error: error.message });
+      }
+      break;
+
+    default:
+      console.warn('Unknown action:', request.action);
+      sendResponse({ error: 'Unknown action' });
+  }
+
+  return true;
 });
 
-// Function to perform a security check and detect changes
-async function performSecurityCheck(tabId, url, sendResponse) {
-    try {
-        // Skip for browser UI pages and empty tabs
-        if (!url || url.startsWith("chrome://") || url.startsWith("edge://") || 
-            url.startsWith("about:") || url.startsWith("chrome-extension://")) {
-            sendResponse({securityChanged: false});
-            return;
-        }
-        
-        // Get current headers
-        const headers = headerDataStore[tabId] || {};
-        
-        // Execute content script to get DOM security data
-        let domResponse = null;
-        try {
-            await chrome.scripting.executeScript({
-                target: {tabId: tabId},
-                files: ['content.js']
-            });
-            
-            domResponse = await new Promise((resolve) => {
-                chrome.tabs.sendMessage(tabId, {action: "analyzePage"}, (response) => {
-                    if (chrome.runtime.lastError) {
-                        console.error("Error analyzing page:", chrome.runtime.lastError);
-                        resolve(null);
-                    } else {
-                        resolve(response);
-                    }
-                });
-            });
-        } catch (error) {
-            console.error("Error executing content script:", error);
-        }
-        
-        // Get previous security history for this URL
-        const history = securityHistory[url] || [];
-        
-        let securityChanged = false;
-        let changes = [];
-        
-        if (history.length > 0) {
-            // Compare with most recent entry
-            const lastEntry = history[history.length - 1];
-            
-            // Compare headers
-            changes = detectSecurityChanges(lastEntry.headers, headers);
-            
-            // Compare DOM security data if available
-            if (domResponse && lastEntry.domData) {
-                // Check for changes in key security indicators
-                if (domResponse.mixedContent !== lastEntry.domData.mixedContent ||
-                    domResponse.cspPresent !== lastEntry.domData.cspPresent ||
-                    domResponse.xFrameOptions !== lastEntry.domData.xFrameOptions ||
-                    JSON.stringify(domResponse.cookieIssues) !== JSON.stringify(lastEntry.domData.cookieIssues) ||
-                    JSON.stringify(domResponse.formIssues) !== JSON.stringify(lastEntry.domData.formIssues) ||
-                    JSON.stringify(domResponse.malwareIndicators) !== JSON.stringify(lastEntry.domData.malwareIndicators)) {
-                    
-                    securityChanged = true;
-                    changes.push("DOM security posture changed");
-                }
-            }
-            
-            securityChanged = changes.length > 0;
-        }
-        
-        // Update security history with current data
-        if (domResponse) {
-            addToSecurityHistory(url, headers, domResponse);
-        }
-        
-        // Update last checked timestamp
-        if (monitoredTabs[tabId]) {
-            monitoredTabs[tabId].lastChecked = new Date().toISOString();
-        }
-        
-        // Send response back to popup
-        sendResponse({
-            securityChanged: securityChanged,
-            changes: changes,
-            analysisData: {
-                domData: domResponse,
-                headerData: headers,
-                url: url,
-                timestamp: new Date().toISOString()
-            }
-        });
-        
-        // If security changed, create notification
-        if (securityChanged) {
-            chrome.notifications.create({
-                type: 'basic',
-                iconUrl: 'icons/icon2.png',
-                title: 'Security Changes Detected',
-                message: `${changes.length} security changes detected on ${url}. Click for details.`,
-                priority: 2
-            });
-        }
-    } catch (error) {
-        console.error("Error performing security check:", error);
-        sendResponse({securityChanged: false, error: error.message});
+/**
+ * Analyze Security Headers
+ */
+async function analyzeSecurityHeaders(url) {
+  const headers = headersCache.get(url) || {};
+  const missing = [];
+  const present = [];
+  const warnings = [];
+
+  for (const [headerKey, headerInfo] of Object.entries(SECURITY_HEADERS)) {
+    if (headers[headerKey]) {
+      present.push({
+        name: headerInfo.name,
+        value: headers[headerKey],
+        severity: headerInfo.severity
+      });
+    } else {
+      missing.push({
+        name: headerInfo.name,
+        severity: headerInfo.severity,
+        description: headerInfo.description
+      });
     }
+  }
+
+  // Check for weak CSP
+  if (headers['content-security-policy']) {
+    const csp = headers['content-security-policy'];
+    if (csp.includes('unsafe-inline') || csp.includes('unsafe-eval')) {
+      warnings.push({
+        header: 'Content-Security-Policy',
+        issue: 'Contains unsafe directives (unsafe-inline or unsafe-eval)',
+        severity: 'medium'
+      });
+    }
+  }
+
+  return {
+    missing,
+    present,
+    warnings,
+    score: calculateHeaderScore(missing, present, warnings)
+  };
 }
 
-// Check for tab updates that might affect security
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    // If this is a monitored tab and the URL changed, update our records
-    if (monitoredTabs[tabId] && changeInfo.url) {
-        monitoredTabs[tabId].url = changeInfo.url;
-        monitoredTabs[tabId].lastChecked = new Date().toISOString();
-        
-        // Trigger a security check for the new URL
-        setTimeout(() => {
-            checkTabSecurity(tabId, changeInfo.url);
-        }, 2000); // Wait for page to load
+/**
+ * Calculate security header score
+ */
+function calculateHeaderScore(missing, present, warnings) {
+  const totalHeaders = Object.keys(SECURITY_HEADERS).length;
+  const presentCount = present.length;
+  const warningPenalty = warnings.length * 5;
+
+  const baseScore = (presentCount / totalHeaders) * 100;
+  return Math.max(0, Math.round(baseScore - warningPenalty));
+}
+
+/**
+ * Check Cookie Security
+ */
+async function checkCookieSecurity(url) {
+  try {
+    const urlObj = new URL(url);
+    const cookies = await chrome.cookies.getAll({ url: url });
+
+    const insecureCookies = [];
+    const secureCookies = [];
+
+    cookies.forEach(cookie => {
+      const issues = [];
+
+      if (!cookie.secure && urlObj.protocol === 'https:') {
+        issues.push('Missing Secure flag');
+      }
+
+      if (!cookie.httpOnly) {
+        issues.push('Missing HttpOnly flag');
+      }
+
+      if (cookie.sameSite === 'no_restriction') {
+        issues.push('No SameSite protection');
+      }
+
+      if (issues.length > 0) {
+        insecureCookies.push({
+          name: cookie.name,
+          domain: cookie.domain,
+          issues: issues
+        });
+      } else {
+        secureCookies.push(cookie.name);
+      }
+    });
+
+    return {
+      total: cookies.length,
+      secure: secureCookies.length,
+      insecure: insecureCookies.length,
+      insecureCookies: insecureCookies,
+      score: cookies.length > 0 ? Math.round((secureCookies.length / cookies.length) * 100) : 100
+    };
+  } catch (error) {
+    console.error('Error checking cookies:', error);
+    return {
+      total: 0,
+      secure: 0,
+      insecure: 0,
+      insecureCookies: [],
+      score: 0,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Check for Phishing Indicators
+ */
+function checkPhishingIndicators(url) {
+  try {
+    const urlObj = new URL(url);
+    const indicators = [];
+    let riskScore = 0;
+
+    // Check for IP address instead of domain
+    if (PHISHING_INDICATORS.urlPatterns[0].test(urlObj.hostname)) {
+      indicators.push('URL uses IP address instead of domain name');
+      riskScore += 30;
     }
+
+    // Check for suspicious TLDs
+    const tld = urlObj.hostname.split('.').pop();
+    if (PHISHING_INDICATORS.suspiciousTLDs.includes('.' + tld)) {
+      indicators.push(`Suspicious top-level domain: .${tld}`);
+      riskScore += 20;
+    }
+
+    // Check for @ symbol (often used to hide real domain)
+    if (urlObj.href.includes('@')) {
+      indicators.push('URL contains @ symbol (potential domain hiding)');
+      riskScore += 40;
+    }
+
+    // Check for excessive hyphens
+    if (PHISHING_INDICATORS.urlPatterns[3].test(urlObj.hostname)) {
+      indicators.push('Domain contains multiple consecutive hyphens');
+      riskScore += 15;
+    }
+
+    // Check for very long subdomains
+    const parts = urlObj.hostname.split('.');
+    const hasLongSubdomain = parts.some(part => part.length > 20);
+    if (hasLongSubdomain) {
+      indicators.push('Unusually long subdomain detected');
+      riskScore += 15;
+    }
+
+    // Check for suspicious keywords in URL
+    const urlLower = url.toLowerCase();
+    const foundKeywords = PHISHING_INDICATORS.suspiciousKeywords.filter(
+      keyword => urlLower.includes(keyword)
+    );
+    if (foundKeywords.length > 2) {
+      indicators.push(`Multiple suspicious keywords: ${foundKeywords.slice(0, 3).join(', ')}`);
+      riskScore += foundKeywords.length * 5;
+    }
+
+    // Check for HTTPS
+    if (urlObj.protocol !== 'https:') {
+      indicators.push('Not using HTTPS encryption');
+      riskScore += 25;
+    }
+
+    return {
+      isPhishing: riskScore >= 50,
+      riskScore: Math.min(riskScore, 100),
+      indicators: indicators,
+      severity: riskScore >= 70 ? 'critical' : riskScore >= 50 ? 'high' : riskScore >= 30 ? 'medium' : 'low'
+    };
+  } catch (error) {
+    console.error('Error checking phishing indicators:', error);
+    return {
+      isPhishing: false,
+      riskScore: 0,
+      indicators: [],
+      severity: 'low',
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Detect Trackers and Fingerprinting Scripts
+ */
+function detectTrackers(resources) {
+  const trackers = [];
+  const fingerprinting = [];
+
+  resources.forEach(resource => {
+    const url = resource.url || resource;
+    const urlLower = url.toLowerCase();
+
+    // Check for tracking domains
+    TRACKER_DOMAINS.forEach(domain => {
+      if (urlLower.includes(domain)) {
+        trackers.push({
+          url: url,
+          type: 'tracker',
+          domain: domain
+        });
+      }
+    });
+
+    // Check for fingerprinting scripts
+    FINGERPRINTING_SCRIPTS.forEach(script => {
+      if (urlLower.includes(script)) {
+        fingerprinting.push({
+          url: url,
+          type: 'fingerprinting',
+          script: script
+        });
+      }
+    });
+  });
+
+  return {
+    trackers: trackers,
+    fingerprinting: fingerprinting,
+    totalTrackers: trackers.length,
+    totalFingerprinting: fingerprinting.length,
+    privacyScore: calculatePrivacyScore(trackers.length, fingerprinting.length)
+  };
+}
+
+/**
+ * Calculate Privacy Score
+ */
+function calculatePrivacyScore(trackerCount, fingerprintCount) {
+  const trackerPenalty = trackerCount * 5;
+  const fingerprintPenalty = fingerprintCount * 10;
+  const totalPenalty = trackerPenalty + fingerprintPenalty;
+
+  return Math.max(0, 100 - totalPenalty);
+}
+
+/**
+ * Save Scan Result to History
+ */
+async function saveScanResult(scanData) {
+  try {
+    const result = await chrome.storage.local.get(['scanHistory']);
+    let history = result.scanHistory || [];
+
+    // Add new scan with timestamp
+    history.unshift({
+      ...scanData,
+      timestamp: new Date().toISOString(),
+      id: Date.now()
+    });
+
+    // Keep only last MAX_HISTORY_SIZE scans
+    if (history.length > MAX_HISTORY_SIZE) {
+      history = history.slice(0, MAX_HISTORY_SIZE);
+    }
+
+    await chrome.storage.local.set({ scanHistory: history });
+    return { success: true, historySize: history.length };
+  } catch (error) {
+    console.error('Error saving scan result:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Get Scan History
+ */
+async function getScanHistory(limit = 10) {
+  try {
+    const result = await chrome.storage.local.get(['scanHistory']);
+    const history = result.scanHistory || [];
+    return history.slice(0, limit);
+  } catch (error) {
+    console.error('Error getting scan history:', error);
+    return [];
+  }
+}
+
+// Extension installation handler
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === 'install') {
+    console.log('Website Security Scanner v2.0 installed');
+    chrome.storage.local.set({
+      installDate: new Date().toISOString(),
+      scanCount: 0,
+      scanHistory: [],
+      settings: {
+        darkMode: false,
+        realTimeMonitoring: false
+      }
+    });
+  } else if (details.reason === 'update') {
+    console.log('Website Security Scanner updated to v2.0');
+    // Preserve existing data, add new fields
+    chrome.storage.local.get(null, (data) => {
+      chrome.storage.local.set({
+        ...data,
+        scanHistory: data.scanHistory || [],
+        settings: {
+          darkMode: data.settings?.darkMode || false,
+          realTimeMonitoring: data.settings?.realTimeMonitoring || false
+        }
+      });
+    });
+  }
 });
 
-// Function to check tab security
-const checkTabSecurity = async (tabId, url) => {
-    try {
-        // Skip for browser UI pages and empty tabs
-        if (!url || url.startsWith("chrome://") || url.startsWith("edge://") || 
-            url.startsWith("about:") || url.startsWith("chrome-extension://")) {
-            return;
-        }
-        
-        // Get current headers
-        const headers = headerDataStore[tabId] || {};
-        
-        // Get previous security history for this URL
-        const history = securityHistory[url] || [];
-        
-        if (history.length > 0) {
-            // Compare with most recent entry
-            const lastEntry = history[history.length - 1];
-            const changes = detectSecurityChanges(lastEntry.headers, headers);
-            
-            if (changes.length > 0) {
-                // Create notification for security changes
-                chrome.notifications.create({
-                    type: 'basic',
-                    iconUrl: 'icons/icon2.png',
-                    title: 'Security Changes Detected',
-                    message: `${changes.length} security header changes detected on ${url}. Click for details.`,
-                    priority: 2
-                });
-            }
-        }
-        
-        // Update last checked timestamp
-        if (monitoredTabs[tabId]) {
-            monitoredTabs[tabId].lastChecked = new Date().toISOString();
-        }
-    } catch (error) {
-        console.error("Error checking tab security:", error);
+// Handle tab updates to refresh header cache
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && tab.url) {
+    console.log('Tab loaded:', tab.url);
+  }
+});
+
+// Network request monitoring for traffic analysis
+const networkStats = new Map();
+
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    const tabId = details.tabId;
+    if (tabId < 0) return;
+
+    if (!networkStats.has(tabId)) {
+      networkStats.set(tabId, {
+        requestCount: 0,
+        totalBytes: 0,
+        requestTypes: {},
+        startTime: Date.now()
+      });
     }
-};
+
+    const stats = networkStats.get(tabId);
+    stats.requestCount++;
+
+    const type = details.type || 'other';
+    stats.requestTypes[type] = (stats.requestTypes[type] || 0) + 1;
+  },
+  { urls: ["<all_urls>"] }
+);
+
+chrome.webRequest.onCompleted.addListener(
+  (details) => {
+    const tabId = details.tabId;
+    if (tabId < 0 || !networkStats.has(tabId)) return;
+
+    const stats = networkStats.get(tabId);
+    if (details.responseHeaders) {
+      const contentLength = details.responseHeaders.find(
+        h => h.name.toLowerCase() === 'content-length'
+      );
+      if (contentLength) {
+        stats.totalBytes += parseInt(contentLength.value, 10) || 0;
+      }
+    }
+  },
+  { urls: ["<all_urls>"] },
+  ["responseHeaders"]
+);
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  networkStats.delete(tabId);
+  if (headersCache.size > 50) {
+    const keysToDelete = Array.from(headersCache.keys()).slice(0, headersCache.size - 50);
+    keysToDelete.forEach(key => headersCache.delete(key));
+  }
+});
+
+// Keep service worker alive
+chrome.alarms.create('keepAlive', { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'keepAlive') {
+    console.log('Service worker heartbeat - v2.0');
+  }
+});
+
+console.log('Website Security Scanner v2.0 background service worker initialized');

@@ -1,258 +1,412 @@
+// Website Security Scanner Content Script - Enhanced v2.0
+// Runs inside web pages to collect security and privacy data
+
+// Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "analyzePage") {
-        try {
-            const analysisResults = {
-                hasMixedContent: false,
-                hasCSP: false, // For meta tag CSP
-                hasXFrameOptions: false, // For meta tag X-Frame-Options
-                cookies: [],
-                sensitiveAutocomplete: false,
-                passwordInputTypeError: false,
-            // Enhanced malware detection fields
-            suspiciousExternalScripts: false,
-            suspiciousDomains: [],
-            malwareReputationIssues: [],
-            cryptoMiningDetected: false,
-            formCrossOriginAction: false,
-            hasObfuscatedJS: false,
-            totalRequests: 0,
-            externalRequests: 0,
-            hasLargeResources: false,
-                // Real-time monitoring support
-                monitoringActive: false,
-                lastUpdated: new Date().toISOString()
-            };
+  switch (request.action) {
+    case 'analyzeTraffic':
+      sendResponse(analyzeTraffic());
+      break;
 
-            // 1. Check for Mixed Content
-            const currentProtocol = window.location.protocol;
-            if (currentProtocol === 'https:') {
-                const insecureResources = document.querySelectorAll(
-                    'img[src^="http:"], script[src^="http:"], link[href^="http:"], iframe[src^="http:"]'
-                );
-                if (insecureResources.length > 0) {
-                    analysisResults.hasMixedContent = true;
-                }
-            }
+    case 'checkSecurityHeaders':
+      sendResponse(checkSecurityHeaders());
+      break;
 
-            // 2. Check for Content Security Policy (CSP) meta tag
-            const cspMeta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
-            if (cspMeta) {
-                analysisResults.hasCSP = true;
-            }
+    case 'analyzeCookies':
+      sendResponse(analyzeCookies());
+      break;
 
-            // 3. Check for X-Frame-Options meta tag (less common, usually a header)
-            const xFrameOptionsMeta = document.querySelector('meta[http-equiv="X-Frame-Options"]');
-            if (xFrameOptionsMeta) {
-                analysisResults.hasXFrameOptions = true;
-            }
+    case 'detectMixedContent':
+      sendResponse(detectMixedContent());
+      break;
 
-            // 4. Analyze Cookies (limited by document.cookie string)
-            const cookiesString = document.cookie;
-            if (cookiesString) {
-                cookiesString.split(';').forEach(cookiePair => {
-                    const parts = cookiePair.trim().split('=');
-                    const name = parts[0];
-                    const value = parts.slice(1).join('=');
-                    const cookieInfo = {
-                        name: name,
-                        value: value,
-                        secure: cookiePair.includes('Secure'),
-                        httpOnlyDetected: false // If accessible via JS, it's not HttpOnly
-                    };
-                    analysisResults.cookies.push(cookieInfo);
-                });
-            }
+    case 'analyzeFormSecurity':
+      sendResponse(analyzeFormSecurity());
+      break;
 
-            // 7. Form Security Checks
-            const sensitiveInputTypes = ['password', 'current-password', 'new-password', 'cc-number', 'cc-csc', 'cc-exp'];
-            document.querySelectorAll('input').forEach(input => {
-                if (sensitiveInputTypes.includes(input.autocomplete) && input.autocomplete !== 'off') {
-                    analysisResults.sensitiveAutocomplete = true;
-                }
-            });
-            document.querySelectorAll('input[id*="pass"], input[name*="pass"]').forEach(input => {
-                if (input.type !== 'password' && input.type !== 'hidden') {
-                    analysisResults.passwordInputTypeError = true;
-                }
-            });
+    case 'getThirdPartyResources':
+      sendResponse(getThirdPartyResources());
+      break;
 
-            // --- New Features: Malware Attack Possibilities ---
+    case 'detectFingerprinting':
+      sendResponse(detectFingerprinting());
+      break;
 
-            // 8. Enhanced Malware Detection
-            const currentHost = window.location.hostname;
-            let missingSRIExternalScripts = 0;
-            const suspiciousDomains = [];
-            const malwareReputationIssues = [];
-            
-            // Known malicious/suspicious domain patterns
-            const suspiciousPatterns = [
-                /bitcoin|crypto|mining|coin/i,
-                /malware|virus|trojan/i,
-                /phishing|scam|fraud/i,
-                /tracker|analytics.*suspicious/i,
-                /ads.*malicious/i
-            ];
-            
-            // Known crypto mining domains (basic list)
-            const cryptoMiningDomains = [
-                'coinhive.com', 'cryptonight.com', 'miner.com',
-                'webmine.pro', 'coinimp.com', 'cryptoloot.pro'
-            ];
-            
-            document.querySelectorAll('script[src]').forEach(script => {
-                try {
-                    const scriptUrl = new URL(script.src);
-                    const domain = scriptUrl.hostname;
-                    
-                    if (domain !== currentHost) {
-                        // SRI check
-                        const hasIntegrity = !!script.getAttribute('integrity');
-                        if (!hasIntegrity) {
-                            missingSRIExternalScripts++;
-                        }
-                        
-                        // Check for suspicious patterns
-                        const isSuspicious = suspiciousPatterns.some(pattern => pattern.test(domain));
-                        const isCryptoMining = cryptoMiningDomains.some(cryptoDomain => domain.includes(cryptoDomain));
-                        
-                        if (isSuspicious || isCryptoMining) {
-                            analysisResults.suspiciousExternalScripts = true;
-                            suspiciousDomains.push(domain);
-                            
-                            if (isCryptoMining) {
-                                analysisResults.cryptoMiningDetected = true;
-                                malwareReputationIssues.push(`Crypto mining domain: ${domain}`);
-                            } else if (isSuspicious) {
-                                malwareReputationIssues.push(`Suspicious domain pattern: ${domain}`);
-                            }
-                        }
-                        
-                        // Check for domains with suspicious TLDs
-                        const suspiciousTLDs = ['.tk', '.ml', '.ga', '.cf', '.click', '.download'];
-                        if (suspiciousTLDs.some(tld => domain.endsWith(tld))) {
-                            suspiciousDomains.push(domain);
-                            malwareReputationIssues.push(`Suspicious TLD: ${domain}`);
-                        }
-                    }
-                } catch (e) {
-                    // Handle invalid URLs
-                }
-            });
-            
-            // Check for crypto mining scripts in inline code
-            document.querySelectorAll('script:not([src])').forEach(inlineScript => {
-                const scriptContent = inlineScript.textContent.toLowerCase();
-                if (scriptContent.includes('coinhive') || scriptContent.includes('cryptonight') || 
-                    scriptContent.includes('webgl') && scriptContent.includes('mining')) {
-                    analysisResults.cryptoMiningDetected = true;
-                    malwareReputationIssues.push('Crypto mining script detected in inline code');
-                }
-            });
-            
-            analysisResults.suspiciousDomains = suspiciousDomains;
-            analysisResults.malwareReputationIssues = malwareReputationIssues;
+    case 'checkIframeSecurity':
+      sendResponse(checkIframeSecurity());
+      break;
 
-            // Stylesheet SRI checks
-            let missingSRIExternalStyles = 0;
-            document.querySelectorAll('link[rel="stylesheet"][href]').forEach(link => {
-                try {
-                    const hrefUrl = new URL(link.href);
-                    if (hrefUrl.hostname !== currentHost) {
-                        const hasIntegrity = !!link.getAttribute('integrity');
-                        if (!hasIntegrity) {
-                            missingSRIExternalStyles++;
-                        }
-                    }
-                } catch (e) {
-                    // Ignore invalid URLs
-                }
-            });
-            analysisResults.missingSRIExternalScripts = missingSRIExternalScripts;
-            analysisResults.missingSRIExternalStyles = missingSRIExternalStyles;
+    case 'getSecurityMetrics':
+      // Consolidated metrics for comprehensive analysis
+      sendResponse({
+        traffic: analyzeTraffic(),
+        securityHeaders: checkSecurityHeaders(),
+        cookies: analyzeCookies(),
+        mixedContent: detectMixedContent(),
+        formSecurity: analyzeFormSecurity(),
+        thirdParty: getThirdPartyResources(),
+        fingerprinting: detectFingerprinting(),
+        iframes: checkIframeSecurity()
+      });
+      break;
+  }
 
-            // 9. Form Cross-Origin Action
-            document.querySelectorAll('form').forEach(form => {
-                const actionUrl = form.action;
-                if (actionUrl) {
-                    try {
-                        const actionHost = new URL(actionUrl).hostname;
-                        if (actionHost !== currentHost) {
-                            analysisResults.formCrossOriginAction = true;
-                        }
-                    } catch (e) {
-                        // Handle invalid URLs
-                    }
-                }
-            });
-
-            // 10. Basic Obfuscated JavaScript Detection
-            // This is a very simple heuristic and can have false positives/negatives.
-            // More robust detection requires AST analysis.
-            document.querySelectorAll('script:not([src])').forEach(inlineScript => {
-                const scriptContent = inlineScript.textContent;
-                // Look for common obfuscation patterns:
-                // - Very long lines without spaces (minified is okay, but extreme length can be suspicious)
-                // - High density of non-alphanumeric characters
-                // - Presence of eval, unescape, atob, String.fromCharCode in unusual contexts
-                const lineLengthThreshold = 200; // Arbitrary threshold for long lines
-                const nonAlphaNumRatioThreshold = 0.5; // Arbitrary threshold for non-alphanumeric characters
-
-                const lines = scriptContent.split('\n');
-                for (const line of lines) {
-                    if (line.length > lineLengthThreshold && !line.includes(' ')) {
-                        analysisResults.hasObfuscatedJS = true;
-                        break;
-                    }
-                    const nonAlphaNumMatch = line.match(/[^a-zA-Z0-9\s\.\(\)\{\}\[\]\=\-\+\*\/;,:_'"!@#$%^&`~]/g);
-                    if (nonAlphaNumMatch && (nonAlphaNumMatch.length / line.length) > nonAlphaNumRatioThreshold) {
-                        analysisResults.hasObfuscatedJS = true;
-                        break;
-                    }
-                }
-                if (scriptContent.includes('eval(') || scriptContent.includes('unescape(') || scriptContent.includes('atob(') || scriptContent.includes('String.fromCharCode(')) {
-                    // Further check for suspicious usage, but for basic detection, presence is enough
-                    analysisResults.hasObfuscatedJS = true;
-                }
-            });
-
-
-            // --- New Features: Traffic Analysis (Client-Side) ---
-
-            // 11. Total and External Network Requests (from performance API)
-            // This gives a snapshot of resources loaded during page load.
-            // For ongoing requests, background.js webRequest API is better.
-            const resources = performance.getEntriesByType("resource");
-            analysisResults.totalRequests = resources.length;
-
-            resources.forEach(resource => {
-                try {
-                    const resourceUrl = new URL(resource.name);
-                    if (resourceUrl.hostname !== currentHost) {
-                        analysisResults.externalRequests++;
-                    }
-                } catch (e) {
-                    // Ignore invalid resource URLs
-                }
-
-                // 12. Large Resource Detection (e.g., > 1MB)
-                const ONE_MB = 1024 * 1024;
-                if (resource.decodedBodySize && resource.decodedBodySize > ONE_MB) {
-                    analysisResults.hasLargeResources = true;
-                } else if (resource.transferSize && resource.transferSize > ONE_MB) { // Fallback for transfer size
-                     analysisResults.hasLargeResources = true;
-                }
-            });
-
-            sendResponse(analysisResults);
-        } catch (error) {
-            console.error("Error in content script analysis:", error);
-            sendResponse({
-                error: true,
-                errorMessage: error.message,
-                url: window.location.href,
-                timestamp: new Date().toISOString()
-            });
-        }
-    }
-    return true; // Keep the message channel open for async responses
+  return true;
 });
+
+/**
+ * Analyze Network Traffic
+ * Uses Performance API to get resource loading information
+ */
+function analyzeTraffic() {
+  const resources = performance.getEntriesByType('resource');
+  const breakdown = {
+    script: 0,
+    stylesheet: 0,
+    img: 0,
+    xmlhttprequest: 0,
+    fetch: 0,
+    other: 0
+  };
+
+  let totalBytes = 0;
+
+  resources.forEach(resource => {
+    const type = resource.initiatorType || 'other';
+    if (breakdown.hasOwnProperty(type)) {
+      breakdown[type]++;
+    } else {
+      breakdown.other++;
+    }
+    totalBytes += resource.transferSize || 0;
+  });
+
+  return {
+    requestCount: resources.length,
+    totalBytes: totalBytes,
+    breakdown: breakdown,
+    resources: resources.map(r => ({
+      name: r.name,
+      type: r.initiatorType,
+      size: r.transferSize,
+      duration: r.duration
+    }))
+  };
+}
+
+/**
+ * Check Security Headers (Client-side limited check)
+ * Note: Full header analysis happens in background.js
+ */
+function checkSecurityHeaders() {
+  const metaTags = document.querySelectorAll('meta[http-equiv]');
+  const headers = {};
+
+  metaTags.forEach(meta => {
+    const httpEquiv = meta.getAttribute('http-equiv');
+    const content = meta.getAttribute('content');
+    if (httpEquiv && content) {
+      headers[httpEquiv.toLowerCase()] = content;
+    }
+  });
+
+  return {
+    metaHeaders: headers,
+    hasCSPMeta: !!headers['content-security-policy'],
+    missing: headers['content-security-policy'] ? [] : ['Content-Security-Policy']
+  };
+}
+
+/**
+ * Analyze Cookies (Client-side accessible)
+ * Note: Full cookie analysis with flags happens in background.js
+ */
+function analyzeCookies() {
+  const cookies = document.cookie.split(';').filter(c => c.trim());
+
+  return {
+    count: cookies.length,
+    cookies: cookies.map(c => {
+      const [name, ...valueParts] = c.trim().split('=');
+      return {
+        name: name,
+        value: valueParts.join('=').substring(0, 20) + '...' // Truncate for privacy
+      };
+    }),
+    hasFirstPartyCookies: cookies.length > 0
+  };
+}
+
+/**
+ * Detect Mixed Content
+ * Finds HTTP resources loaded on HTTPS pages
+ */
+function detectMixedContent() {
+  if (window.location.protocol !== 'https:') {
+    return {
+      hasMixedContent: false,
+      reason: 'Page is not HTTPS',
+      mixedResources: []
+    };
+  }
+
+  const mixedResources = [];
+
+  // Check images
+  document.querySelectorAll('img[src]').forEach(img => {
+    if (img.src.startsWith('http:')) {
+      mixedResources.push({
+        type: 'image',
+        url: img.src,
+        element: 'img'
+      });
+    }
+  });
+
+  // Check scripts
+  document.querySelectorAll('script[src]').forEach(script => {
+    if (script.src.startsWith('http:')) {
+      mixedResources.push({
+        type: 'script',
+        url: script.src,
+        element: 'script',
+        severity: 'high'
+      });
+    }
+  });
+
+  // Check stylesheets
+  document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+    if (link.href.startsWith('http:')) {
+      mixedResources.push({
+        type: 'stylesheet',
+        url: link.href,
+        element: 'link'
+      });
+    }
+  });
+
+  // Check iframes
+  document.querySelectorAll('iframe[src]').forEach(iframe => {
+    if (iframe.src.startsWith('http:')) {
+      mixedResources.push({
+        type: 'iframe',
+        url: iframe.src,
+        element: 'iframe',
+        severity: 'high'
+      });
+    }
+  });
+
+  return {
+    hasMixedContent: mixedResources.length > 0,
+    count: mixedResources.length,
+    mixedResources: mixedResources,
+    severity: mixedResources.some(r => r.severity === 'high') ? 'high' : 'medium'
+  };
+}
+
+/**
+ * Analyze Form Security
+ * Checks for insecure forms and password fields
+ */
+function analyzeFormSecurity() {
+  const forms = document.querySelectorAll('form');
+  const issues = [];
+  let insecureForms = 0;
+  let passwordFieldsOnHttp = 0;
+
+  forms.forEach((form, index) => {
+    const action = form.action || window.location.href;
+    const method = form.method.toLowerCase();
+    const hasPasswordField = form.querySelector('input[type="password"]') !== null;
+
+    // Check if form submits over HTTP
+    if (action.startsWith('http:')) {
+      insecureForms++;
+      issues.push({
+        formIndex: index,
+        issue: 'Form submits over insecure HTTP',
+        action: action,
+        severity: 'critical'
+      });
+    }
+
+    // Check for password fields on HTTP pages
+    if (hasPasswordField && window.location.protocol === 'http:') {
+      passwordFieldsOnHttp++;
+      issues.push({
+        formIndex: index,
+        issue: 'Password field on HTTP page',
+        severity: 'critical'
+      });
+    }
+
+    // Check for autocomplete on sensitive fields
+    const sensitiveFields = form.querySelectorAll('input[type="password"], input[name*="card"], input[name*="ssn"]');
+    sensitiveFields.forEach(field => {
+      if (field.autocomplete !== 'off' && field.autocomplete !== 'new-password') {
+        issues.push({
+          formIndex: index,
+          issue: `Sensitive field allows autocomplete: ${field.name || field.type}`,
+          severity: 'medium'
+        });
+      }
+    });
+  });
+
+  return {
+    totalForms: forms.length,
+    insecureForms: insecureForms,
+    passwordFieldsOnHttp: passwordFieldsOnHttp,
+    issues: issues,
+    isSecure: issues.filter(i => i.severity === 'critical').length === 0
+  };
+}
+
+/**
+ * Get Third-Party Resources
+ * Identifies resources loaded from external domains
+ */
+function getThirdPartyResources() {
+  const currentDomain = window.location.hostname;
+  const resources = performance.getEntriesByType('resource');
+  const thirdParty = [];
+  const domains = new Set();
+
+  resources.forEach(resource => {
+    try {
+      const url = new URL(resource.name);
+      if (url.hostname !== currentDomain) {
+        thirdParty.push({
+          url: resource.name,
+          domain: url.hostname,
+          type: resource.initiatorType,
+          size: resource.transferSize
+        });
+        domains.add(url.hostname);
+      }
+    } catch (e) {
+      // Invalid URL, skip
+    }
+  });
+
+  return {
+    count: thirdParty.length,
+    uniqueDomains: domains.size,
+    domains: Array.from(domains),
+    resources: thirdParty
+  };
+}
+
+/**
+ * Detect Fingerprinting Attempts
+ * Looks for common fingerprinting techniques
+ */
+function detectFingerprinting() {
+  const indicators = [];
+
+  // Check for canvas fingerprinting
+  const canvasElements = document.querySelectorAll('canvas');
+  if (canvasElements.length > 0) {
+    indicators.push({
+      type: 'canvas',
+      description: 'Canvas elements detected (potential fingerprinting)',
+      count: canvasElements.length
+    });
+  }
+
+  // Check for WebGL usage
+  const webglCanvas = Array.from(canvasElements).find(canvas => {
+    return canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+  });
+  if (webglCanvas) {
+    indicators.push({
+      type: 'webgl',
+      description: 'WebGL context detected (potential fingerprinting)'
+    });
+  }
+
+  // Check for font detection scripts
+  const scripts = Array.from(document.querySelectorAll('script[src]'));
+  const fontDetectionScripts = scripts.filter(s =>
+    s.src.includes('font') || s.src.includes('detect')
+  );
+  if (fontDetectionScripts.length > 0) {
+    indicators.push({
+      type: 'font-detection',
+      description: 'Font detection scripts found',
+      count: fontDetectionScripts.length
+    });
+  }
+
+  // Check for AudioContext (audio fingerprinting)
+  if (window.AudioContext || window.webkitAudioContext) {
+    indicators.push({
+      type: 'audio',
+      description: 'AudioContext API available (potential audio fingerprinting)'
+    });
+  }
+
+  return {
+    detected: indicators.length > 0,
+    count: indicators.length,
+    indicators: indicators,
+    riskLevel: indicators.length >= 3 ? 'high' : indicators.length >= 1 ? 'medium' : 'low'
+  };
+}
+
+/**
+ * Check Iframe Security
+ * Analyzes iframe embeddings for security issues
+ */
+function checkIframeSecurity() {
+  const iframes = document.querySelectorAll('iframe');
+  const issues = [];
+  let insecureIframes = 0;
+
+  iframes.forEach((iframe, index) => {
+    const src = iframe.src;
+    const sandbox = iframe.sandbox;
+
+    // Check for HTTP iframes on HTTPS page
+    if (window.location.protocol === 'https:' && src.startsWith('http:')) {
+      insecureIframes++;
+      issues.push({
+        index: index,
+        issue: 'HTTP iframe on HTTPS page (mixed content)',
+        src: src,
+        severity: 'high'
+      });
+    }
+
+    // Check for missing sandbox attribute
+    if (!sandbox || sandbox.length === 0) {
+      issues.push({
+        index: index,
+        issue: 'Iframe missing sandbox attribute',
+        src: src,
+        severity: 'medium'
+      });
+    }
+
+    // Check for overly permissive sandbox
+    if (sandbox && sandbox.contains('allow-scripts') && sandbox.contains('allow-same-origin')) {
+      issues.push({
+        index: index,
+        issue: 'Iframe has dangerous sandbox combination (allow-scripts + allow-same-origin)',
+        src: src,
+        severity: 'high'
+      });
+    }
+  });
+
+  return {
+    totalIframes: iframes.length,
+    insecureIframes: insecureIframes,
+    issues: issues,
+    isSecure: issues.filter(i => i.severity === 'high').length === 0
+  };
+}
+
+console.log('Website Security Scanner v2.0 content script loaded');

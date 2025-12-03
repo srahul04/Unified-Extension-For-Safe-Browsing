@@ -1,1272 +1,642 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Security Analyzer</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&display=swap');
-        @import url('https://cdn.jsdelivr.net/npm/ionicons@7.1.0/dist/ionicons/ionicons.esm.js');
-        
-        * {
-            box-sizing: border-box;
-        }
-        
-        :root {
-            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --primary-gradient-dark: linear-gradient(135deg, #4c63d2 0%, #5a4fcf 100%);
-            --bg-light: #ffffff;
-            --bg-dark: #0f172a;
-            --surface-light: #ffffff;
-            --surface-dark: #1e293b;
-            --text-light: #1a202c;
-            --text-dark: #f1f5f9;
-            --border-light: #e2e8f0;
-            --border-dark: #334155;
-            --success-light: #10b981;
-            --success-dark: #34d399;
-            --warning-light: #f59e0b;
-            --warning-dark: #fbbf24;
-            --error-light: #ef4444;
-            --error-dark: #f87171;
-            --info-light: #3b82f6;
-            --info-dark: #60a5fa;
-        }
-
-        [data-theme="light"] {
-            --bg: var(--bg-light);
-            --surface: var(--surface-light);
-            --text: var(--text-light);
-            --border: var(--border-light);
-            --success: var(--success-light);
-            --warning: var(--warning-light);
-            --error: var(--error-light);
-            --info: var(--info-light);
-            --primary-grad: var(--primary-gradient);
-        }
-
-        [data-theme="dark"] {
-            --bg: var(--bg-dark);
-            --surface: var(--surface-dark);
-            --text: var(--text-dark);
-            --border: var(--border-dark);
-            --success: var(--success-dark);
-            --warning: var(--warning-dark);
-            --error: var(--error-dark);
-            --info: var(--info-dark);
-            --primary-grad: var(--primary-gradient-dark);
-        }
-
-        body {
-            width: 420px;
-            min-height: 600px;
-            font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--primary-grad);
-            margin: 0;
-            padding: 0;
-            color: var(--text);
-            overflow-x: hidden;
-            transition: all 0.3s ease;
-        }
-        
-        .main-container {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            border-radius: 20px;
-            margin: 8px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-            transition: all 0.3s ease;
-        }
-
-        [data-theme="dark"] .main-container {
-            background: rgba(15, 23, 42, 0.95);
-        }
-
-        .theme-toggle {
-            position: absolute;
-            top: 16px;
-            right: 16px;
-            background: rgba(255, 255, 255, 0.2);
-            border: none;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            z-index: 10;
-        }
-
-        .theme-toggle:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: scale(1.1);
-        }
-
-        .theme-toggle ion-icon {
-            font-size: 20px;
-            color: white;
-        }
-        
-        .header {
-            background: var(--primary-grad);
-            color: white;
-            padding: 24px 20px;
-            text-align: center;
-            position: relative;
-            transition: all 0.3s ease;
-        }
-        
-        .header::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="white" opacity="0.1"/><circle cx="75" cy="75" r="1" fill="white" opacity="0.1"/><circle cx="50" cy="10" r="0.5" fill="white" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
-            opacity: 0.3;
-        }
-        
-        .header h1 {
-            font-size: 24px;
-            font-weight: 700;
-            margin: 0;
-            position: relative;
-            z-index: 1;
-            letter-spacing: -0.5px;
-        }
-        
-        .header .subtitle {
-            font-size: 14px;
-            opacity: 0.9;
-            margin-top: 4px;
-            font-weight: 400;
-            position: relative;
-            z-index: 1;
-        }
-        
-        .container {
-            padding: 20px;
-        }
-        
-        .scan-controls {
-            background: var(--surface);
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            border: 1px solid var(--border);
-            transition: all 0.3s ease;
-        }
-        
-        .scan-buttons {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        
-        .btn {
-            flex: 1;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 12px;
-            font-weight: 600;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .btn::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-            transition: left 0.5s;
-        }
-        
-        .btn:hover::before {
-            left: 100%;
-        }
-        
-        .btn-start {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
-        }
-        
-        .btn-start:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
-        }
-        
-        .btn-stop {
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-            color: white;
-            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
-        }
-        
-        .btn-stop:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
-        }
-        
-        .btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none !important;
-        }
-        
-        .scan-modes {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-        
-        .scan-mode {
-            display: flex;
-            align-items: center;
-            padding: 12px 16px;
-            background: var(--surface);
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border: 2px solid transparent;
-            color: var(--text);
-        }
-        
-        .scan-mode:hover {
-            background: var(--border);
-        }
-
-        [data-theme="dark"] .scan-mode {
-            background: #1e293b;
-            color: #f1f5f9;
-        }
-
-        [data-theme="dark"] .scan-mode:hover {
-            background: #334155;
-        }
-        
-        .scan-mode input[type="radio"] {
-            margin-right: 12px;
-            accent-color: #667eea;
-        }
-        
-        .scan-mode input[type="radio"]:checked + .mode-content {
-            color: #667eea;
-            font-weight: 600;
-        }
-        
-        .scan-mode:has(input:checked) {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-color: #667eea;
-        }
-        
-        .mode-content {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .mode-title {
-            font-weight: 600;
-            font-size: 14px;
-            color: var(--text);
-        }
-        
-        .mode-desc {
-            font-size: 12px;
-            opacity: 0.7;
-            margin-top: 2px;
-            color: var(--text);
-        }
-
-        [data-theme="dark"] .mode-title,
-        [data-theme="dark"] .mode-desc {
-            color: #f1f5f9;
-        }
-        
-        .api-info {
-            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-            border: 1px solid #0ea5e9;
-            border-radius: 12px;
-            padding: 16px;
-            margin-top: 16px;
-            transition: all 0.3s ease;
-        }
-        
-        .api-info strong {
-            color: #0369a1;
-            font-weight: 600;
-        }
-        
-        .api-info .text-xs {
-            font-size: 12px;
-            color: #0c4a6e;
-            line-height: 1.5;
-        }
-
-        [data-theme="dark"] .api-info {
-            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
-            border-color: #3b82f6;
-        }
-
-        [data-theme="dark"] .api-info strong {
-            color: #60a5fa;
-        }
-
-        [data-theme="dark"] .api-info .text-xs {
-            color: #93c5fd;
-        }
-        
-        .scanning-ui {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 40px 20px;
-            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-            border-radius: 20px;
-            margin: 20px 0;
-            color: white;
-            min-height: 300px;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .scanning-ui::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: radial-gradient(circle at 30% 20%, rgba(102, 126, 234, 0.3) 0%, transparent 50%),
-                        radial-gradient(circle at 70% 80%, rgba(118, 75, 162, 0.3) 0%, transparent 50%);
-        }
-        
-        .scanning-animation {
-            width: 80px;
-            height: 80px;
-            border: 4px solid rgba(255, 255, 255, 0.2);
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1.5s linear infinite;
-            margin-bottom: 24px;
-            position: relative;
-            z-index: 1;
-        }
-        
-        .scanning-text {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            position: relative;
-            z-index: 1;
-        }
-        
-        .scanning-progress {
-            font-size: 14px;
-            opacity: 0.8;
-            position: relative;
-            z-index: 1;
-        }
-        
-        .results {
-            background: var(--surface);
-            border-radius: 20px;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            transition: all 0.3s ease;
-        }
-
-        [data-theme="dark"] .results {
-            background: #1e293b;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-        }
-        
-        .section-title {
-            font-weight: 700;
-            font-size: 16px;
-            margin: 0;
-            padding: 20px 20px 12px;
-            color: var(--text);
-            background: var(--surface);
-            border-bottom: 1px solid var(--border);
-            position: relative;
-            transition: all 0.3s ease;
-        }
-
-        [data-theme="dark"] .section-title {
-            color: #f1f5f9;
-            background: #1e293b;
-            border-bottom-color: #334155;
-        }
-        
-        .section-title::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 20px;
-            right: 20px;
-            height: 2px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            border-radius: 1px;
-        }
-        
-        .result-item {
-            display: flex;
-            align-items: flex-start;
-            padding: 16px 20px;
-            border-bottom: 1px solid var(--border);
-            transition: background 0.2s ease;
-        }
-        
-        .result-item:hover {
-            background: var(--surface);
-        }
-        
-        .result-item:last-child {
-            border-bottom: none;
-        }
-
-        [data-theme="dark"] .result-item {
-            border-bottom-color: #334155;
-        }
-
-        [data-theme="dark"] .result-item:hover {
-            background: #334155;
-        }
-        
-        .icon {
-            width: 20px;
-            height: 20px;
-            min-width: 20px;
-            margin-right: 12px;
-            line-height: 20px;
-            text-align: center;
-            font-size: 16px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .success-icon {
-            color: #10b981;
-            background: rgba(16, 185, 129, 0.15);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-        }
-        
-        .warning-icon {
-            color: #f59e0b;
-            background: rgba(245, 158, 11, 0.15);
-            border: 1px solid rgba(245, 158, 11, 0.3);
-        }
-        
-        .error-icon {
-            color: #ef4444;
-            background: rgba(239, 68, 68, 0.15);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-        }
-        
-        .info-icon {
-            color: #3b82f6;
-            background: rgba(59, 130, 246, 0.15);
-            border: 1px solid rgba(59, 130, 246, 0.3);
-        }
-
-        [data-theme="dark"] .success-icon {
-            color: #34d399;
-            background: rgba(52, 211, 153, 0.2);
-            border-color: rgba(52, 211, 153, 0.4);
-        }
-        
-        [data-theme="dark"] .warning-icon {
-            color: #fbbf24;
-            background: rgba(251, 191, 36, 0.2);
-            border-color: rgba(251, 191, 36, 0.4);
-        }
-        
-        [data-theme="dark"] .error-icon {
-            color: #f87171;
-            background: rgba(248, 113, 113, 0.2);
-            border-color: rgba(248, 113, 113, 0.4);
-        }
-        
-        [data-theme="dark"] .info-icon {
-            color: #60a5fa;
-            background: rgba(96, 165, 250, 0.2);
-            border-color: rgba(96, 165, 250, 0.4);
-        }
-        
-        .result-text {
-            flex: 1;
-            font-size: 14px;
-            line-height: 1.5;
-            color: var(--text);
-        }
-
-        [data-theme="dark"] .result-text {
-            color: #f1f5f9;
-        }
-        
-        .tip-box {
-            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
-            border-left: 4px solid #10b981;
-            padding: 20px;
-            border-radius: 12px;
-            margin: 20px;
-            font-size: 14px;
-            color: #065f46;
-            box-shadow: 0 2px 10px rgba(16, 185, 129, 0.1);
-            transition: all 0.3s ease;
-        }
-
-        [data-theme="dark"] .tip-box {
-            background: linear-gradient(135deg, #064e3b 0%, #065f46 100%);
-            border-left-color: #34d399;
-            color: #a7f3d0;
-            box-shadow: 0 2px 10px rgba(52, 211, 153, 0.2);
-        }
-        
-        .tip-box ul {
-            list-style: none;
-            padding: 0;
-            margin: 12px 0 0 0;
-        }
-        
-        .tip-box li {
-            padding: 6px 0;
-            position: relative;
-            padding-left: 20px;
-        }
-        
-        .tip-box li::before {
-            content: '✓';
-            position: absolute;
-            left: 0;
-            color: #10b981;
-            font-weight: bold;
-        }
-        
-        .llm-output {
-            background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
-            border-left: 4px solid #0ea5e9;
-            padding: 20px;
-            border-radius: 12px;
-            margin: 20px;
-            font-size: 14px;
-            color: #0c4a6e;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            box-shadow: 0 2px 10px rgba(14, 165, 233, 0.1);
-            transition: all 0.3s ease;
-        }
-
-        [data-theme="dark"] .llm-output {
-            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
-            border-left-color: #3b82f6;
-            color: #93c5fd;
-            box-shadow: 0 2px 10px rgba(59, 130, 246, 0.2);
-        }
-        
-        .llm-loading-text, .pdf-loading-text {
-            text-align: center;
-            font-style: italic;
-            color: #64748b;
-            margin: 20px;
-            padding: 16px;
-            background: #f8fafc;
-            border-radius: 12px;
-            transition: all 0.3s ease;
-        }
-
-        [data-theme="dark"] .llm-loading-text,
-        [data-theme="dark"] .pdf-loading-text {
-            color: #94a3b8;
-            background: #1e293b;
-        }
-        
-        .realtime-indicator {
-            position: fixed;
-            top: 12px;
-            right: 12px;
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
-            z-index: 1000;
-        }
-        
-        .btn-secondary {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            color: white;
-            padding: 8px 16px;
-            border: none;
-            border-radius: 8px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 10px rgba(59, 130, 246, 0.2);
-        }
-        
-        .btn-secondary:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
-        }
-        
-        .btn-download {
-            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 12px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
-            width: 100%;
-            margin: 20px;
-        }
-        
-        .btn-download:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
-        }
-        
-        .btn-download:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none !important;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .hidden {
-            display: none !important;
-        }
-
-        /* Security Assessment Styles */
-        .security-assessment {
-            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 20px;
-            border: 2px solid #e2e8f0;
-            transition: all 0.3s ease;
-        }
-
-        [data-theme="dark"] .security-assessment {
-            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-            border-color: #334155;
-        }
-
-        .assessment-header {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .assessment-header h2 {
-            font-size: 24px;
-            font-weight: 700;
-            margin: 0 0 8px 0;
-            color: var(--text);
-        }
-
-        .security-score {
-            font-size: 18px;
-            font-weight: 600;
-            color: var(--text);
-            opacity: 0.8;
-        }
-
-        .security-summary {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .summary-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 16px;
-            background: var(--surface);
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            transition: all 0.3s ease;
-        }
-
-        [data-theme="dark"] .summary-item {
-            background: #0f172a;
-            border-color: #334155;
-        }
-
-        .summary-label {
-            font-weight: 600;
-            color: var(--text);
-        }
-
-        .status-badge {
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .status-badge.secure {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-            box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
-        }
-
-        .status-badge.warning {
-            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-            color: white;
-            box-shadow: 0 2px 10px rgba(245, 158, 11, 0.3);
-        }
-
-        .status-badge.danger {
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-            color: white;
-            box-shadow: 0 2px 10px rgba(239, 68, 68, 0.3);
-        }
-
-        .risk-badge {
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-weight: 600;
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .risk-badge.low {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-        }
-
-        .risk-badge.medium {
-            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-            color: white;
-        }
-
-        .risk-badge.high {
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-            color: white;
-        }
-
-        .risk-badge.critical {
-            background: linear-gradient(135deg, #7c2d12 0%, #991b1b 100%);
-            color: white;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
-        }
-        
-        /* Enhanced scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: #f1f5f9;
-            border-radius: 4px;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 4px;
-            transition: background 0.3s ease;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-        }
-
-        [data-theme="dark"] ::-webkit-scrollbar-track {
-            background: #1e293b;
-        }
-
-        [data-theme="dark"] ::-webkit-scrollbar-thumb {
-            background: #475569;
-        }
-
-        [data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
-            background: #64748b;
-        }
-
-        /* Accessibility improvements */
-        .sr-only {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            padding: 0;
-            margin: -1px;
-            overflow: hidden;
-            clip: rect(0, 0, 0, 0);
-            white-space: nowrap;
-            border: 0;
-        }
-
-        /* Focus indicators */
-        .btn:focus,
-        .scan-mode:focus,
-        .theme-toggle:focus {
-            outline: 2px solid #667eea;
-            outline-offset: 2px;
-        }
-
-        /* High contrast mode support */
-        @media (prefers-contrast: high) {
-            .btn-start {
-                background: #000;
-                color: #fff;
-                border: 2px solid #fff;
-            }
-            
-            .btn-stop {
-                background: #fff;
-                color: #000;
-                border: 2px solid #000;
-            }
-        }
-
-        /* Reduced motion support */
-        @media (prefers-reduced-motion: reduce) {
-            * {
-                animation-duration: 0.01ms !important;
-                animation-iteration-count: 1 !important;
-                transition-duration: 0.01ms !important;
-            }
-        }
-
-        /* Responsive improvements */
-        @media (max-width: 400px) {
-            body {
-                width: 100vw;
-                min-width: 320px;
-            }
-            
-            .main-container {
-                margin: 4px;
-                border-radius: 16px;
-            }
-            
-            .container {
-                padding: 16px;
-            }
-            
-            .scan-buttons {
-                flex-direction: column;
-                gap: 8px;
-            }
-            
-            .btn {
-                padding: 10px 16px;
-                font-size: 13px;
-            }
-        }
-
-        /* Loading states */
-        .loading {
-            opacity: 0.6;
-            position: relative;
-        }
-
-        /* Keep Stop button interactive even during loading */
-        .loading #stop-scan-btn {
-            pointer-events: auto;
-        }
- 
-        /* Non-blocking spinner overlay */
-        .loading::after {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 20px;
-            height: 20px;
-            margin: -10px 0 0 -10px;
-            border: 2px solid #667eea;
-            border-top: 2px solid transparent;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            pointer-events: none;
-        }
-
-        /* Enhanced result items with better spacing */
-        .result-item {
-            position: relative;
-            transition: all 0.2s ease;
-        }
-
-        .result-item:hover {
-            transform: translateX(4px);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        [data-theme="dark"] .result-item:hover {
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-        }
-
-        /* Status indicators */
-        .status-indicator {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #10b981;
-        }
-
-        .status-indicator.warning {
-            background: #f59e0b;
-        }
-
-        .status-indicator.error {
-            background: #ef4444;
-        }
-
-        /* Enhanced security assessment with progress bars */
-        .security-progress {
-            width: 100%;
-            height: 8px;
-            background: #e2e8f0;
-            border-radius: 4px;
-            overflow: hidden;
-            margin: 8px 0;
-        }
-
-        .security-progress-bar {
-            height: 100%;
-            background: linear-gradient(90deg, #10b981, #059669);
-            border-radius: 4px;
-            transition: width 0.3s ease;
-        }
-
-        .security-progress-bar.warning {
-            background: linear-gradient(90deg, #f59e0b, #d97706);
-        }
-
-        .security-progress-bar.danger {
-            background: linear-gradient(90deg, #ef4444, #dc2626);
-        }
-
-        [data-theme="dark"] .security-progress {
-            background: #334155;
-        }
-
-        /* Improved typography */
-        .text-balance {
-            text-wrap: balance;
-        }
-
-        /* Better button states */
-        .btn:active {
-            transform: translateY(1px);
-        }
-
-        .btn:disabled:active {
-            transform: none;
-        }
-
-        /* Enhanced scan mode selection */
-        .scan-mode {
-            position: relative;
-            overflow: hidden;
-        }
-
-        .scan-mode::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-            transition: left 0.5s;
-        }
-
-        .scan-mode:hover::before {
-            left: 100%;
-        }
-
-        /* Improved modal styling */
-        .modal-backdrop {
-            backdrop-filter: blur(4px);
-            background: rgba(0, 0, 0, 0.5);
-        }
-
-        /* Better form controls */
-        select, input[type="checkbox"] {
-            accent-color: #667eea;
-        }
-
-        /* Enhanced error states */
-        .error-state {
-            border: 2px solid #ef4444;
-            background: rgba(239, 68, 68, 0.05);
-        }
-
-        /* Success states */
-        .success-state {
-            border: 2px solid #10b981;
-            background: rgba(16, 185, 129, 0.05);
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Website Security Scanner v2.0</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 450px;
+      min-height: 550px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #333;
+      transition: all 0.3s ease;
+    }
+
+    body.dark-mode {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #e0e0e0;
+    }
+
+    .container {
+      background: white;
+      min-height: 100%;
+    }
+
+    body.dark-mode .container {
+      background: #0f0f23;
+      color: #e0e0e0;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      position: relative;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      margin-bottom: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .header p {
+      font-size: 11px;
+      opacity: 0.9;
+    }
+
+    .header-controls {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      color: white;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 0.2s;
+    }
+
+    .icon-btn:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: scale(1.1);
+    }
+
+    .content {
+      padding: 20px;
+    }
+
+    body.dark-mode .content {
+      background: #0f0f23;
+    }
+
+    .api-section {
+      display: none;
+    }
+
+    .scan-options {
+      margin-bottom: 20px;
+    }
+
+    .scan-options h3 {
+      font-size: 14px;
+      margin-bottom: 12px;
+      color: #333;
+      font-weight: 600;
+    }
+
+    body.dark-mode .scan-options h3 {
+      color: #e0e0e0;
+    }
+
+    .checkbox-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .checkbox-item {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 2px solid transparent;
+    }
+
+    body.dark-mode .checkbox-item {
+      background: #1a1a2e;
+      border-color: #2a2a3e;
+    }
+
+    .checkbox-item:hover {
+      background: #e9ecef;
+      border-color: #667eea;
+    }
+
+    body.dark-mode .checkbox-item:hover {
+      background: #2a2a3e;
+      border-color: #667eea;
+    }
+
+    .checkbox-item input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      margin-right: 8px;
+      accent-color: #667eea;
+      cursor: pointer;
+    }
+
+    .checkbox-item label {
+      flex: 1;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    body.dark-mode .checkbox-item label {
+      color: #e0e0e0;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+      margin-top: 10px;
+      font-size: 12px;
+      padding: 10px;
+    }
+
+    .btn-secondary:hover {
+      background: #5a6268;
+    }
+
+    .progress-section {
+      display: none;
+      margin-top: 20px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    body.dark-mode .progress-section {
+      background: #1a1a2e;
+    }
+
+    .progress-section.active {
+      display: block;
+    }
+
+    .progress-bar-container {
+      width: 100%;
+      height: 8px;
+      background: #e0e0e0;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    body.dark-mode .progress-bar-container {
+      background: #2a2a3e;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+      transition: width 0.3s;
+      width: 0%;
+    }
+
+    .progress-text {
+      font-size: 12px;
+      color: #555;
+      text-align: center;
+    }
+
+    body.dark-mode .progress-text {
+      color: #b0b0b0;
+    }
+
+    .results-section {
+      display: none;
+      margin-top: 20px;
+    }
+
+    .results-section.active {
+      display: block;
+    }
+
+    .score-card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+
+    .score-card h3 {
+      font-size: 16px;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+    }
+
+    .score-item {
+      text-align: center;
+    }
+
+    .score-label {
+      font-size: 11px;
+      opacity: 0.9;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .score-value {
+      font-size: 36px;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .score-value.grade-a {
+      color: #10b981;
+    }
+
+    .score-value.grade-b {
+      color: #3b82f6;
+    }
+
+    .score-value.grade-c {
+      color: #f59e0b;
+    }
+
+    .score-value.grade-d {
+      color: #ef4444;
+    }
+
+    .score-value.grade-f {
+      color: #dc2626;
+    }
+
+    .score-number {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+
+    .result-item {
+      padding: 12px;
+      margin-bottom: 10px;
+      border-radius: 6px;
+      border-left: 4px solid;
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(-10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    .result-item.critical {
+      background: #fff5f5;
+      border-color: #e53e3e;
+    }
+
+    body.dark-mode .result-item.critical {
+      background: #2d1515;
+      border-color: #e53e3e;
+    }
+
+    .result-item.warning {
+      background: #fffbeb;
+      border-color: #f59e0b;
+    }
+
+    body.dark-mode .result-item.warning {
+      background: #2d2515;
+      border-color: #f59e0b;
+    }
+
+    .result-item.info {
+      background: #eff6ff;
+      border-color: #3b82f6;
+    }
+
+    body.dark-mode .result-item.info {
+      background: #15202d;
+      border-color: #3b82f6;
+    }
+
+    .result-item.success {
+      background: #f0fdf4;
+      border-color: #10b981;
+    }
+
+    body.dark-mode .result-item.success {
+      background: #152d20;
+      border-color: #10b981;
+    }
+
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .result-item h4 {
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .result-item p {
+      font-size: 12px;
+      color: #666;
+      line-height: 1.4;
+    }
+
+    body.dark-mode .result-item p {
+      color: #b0b0b0;
+    }
+
+    .suggestions {
+      margin-top: 8px;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.05);
+      border-radius: 4px;
+      font-size: 11px;
+      font-style: italic;
+    }
+
+    body.dark-mode .suggestions {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: white;
+    }
+
+    .badge.critical {
+      background: #e53e3e;
+    }
+
+    .badge.warning {
+      background: #f59e0b;
+    }
+
+    .badge.info {
+      background: #3b82f6;
+    }
+
+    .badge.success {
+      background: #10b981;
+    }
+
+    .badge.error {
+      background: #6c757d;
+    }
+
+    .current-url {
+      font-size: 11px;
+      padding: 8px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      word-break: break-all;
+      color: #666;
+    }
+
+    body.dark-mode .current-url {
+      background: #1a1a2e;
+      color: #b0b0b0;
+    }
+
+    .loading-spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+
+    .select-all-btn {
+      font-size: 11px;
+      padding: 6px 12px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-bottom: 10px;
+      transition: all 0.2s;
+    }
+
+    .select-all-btn:hover {
+      background: #5568d3;
+      transform: translateY(-1px);
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 15px;
+    }
+
+    .action-buttons button {
+      flex: 1;
+    }
+
+    .modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal-content {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      max-width: 400px;
+      max-height: 80%;
+      overflow-y: auto;
+    }
+
+    body.dark-mode .modal-content {
+      background: #1a1a2e;
+      color: #e0e0e0;
+    }
+
+    .history-item {
+      padding: 10px;
+      margin: 10px 0;
+      background: #f8f9fa;
+      border-radius: 6px;
+      border-left: 3px solid #667eea;
+    }
+
+    body.dark-mode .history-item {
+      background: #2a2a3e;
+    }
+
+    .version-badge {
+      position: absolute;
+      top: 5px;
+      left: 10px;
+      font-size: 9px;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 2px 6px;
+      border-radius: 10px;
+    }
+  </style>
 </head>
+
 <body>
-    <div class="main-container">
-        <!-- Header -->
-        <div class="header">
-            <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark/light theme">
-                <ion-icon name="sunny-outline" id="theme-icon" aria-hidden="true"></ion-icon>
-            </button>
-            <h1><ion-icon name="shield-checkmark-outline" aria-hidden="true"></ion-icon> Web Security Analyzer</h1>
-            <div class="subtitle">Advanced Multi-Engine Malware Detection</div>
-        </div>
-
-        <!-- Scan Controls -->
-        <div class="container">
-            <div id="scan-controls" class="scan-controls">
-                <div class="scan-buttons">
-                    <button id="start-scan-btn" class="btn btn-start" aria-describedby="scan-description">
-                        <ion-icon name="play-outline" aria-hidden="true"></ion-icon> Start Scan
-                    </button>
-                    <button id="stop-scan-btn" class="btn btn-stop" aria-describedby="scan-description">
-                        <ion-icon name="stop-outline" aria-hidden="true"></ion-icon> Stop Scan
-                    </button>
-                </div>
-                <div id="scan-description" class="sr-only">Start or stop security analysis of the current webpage</div>
-                
-                <fieldset class="scan-modes">
-                    <legend class="sr-only">Select scan mode</legend>
-                    <label class="scan-mode">
-                        <input type="radio" name="scan-mode" value="quick" checked aria-describedby="quick-desc">
-                        <div class="mode-content">
-                            <div class="mode-title"><ion-icon name="flash-outline" aria-hidden="true"></ion-icon> Quick Scan</div>
-                            <div class="mode-desc" id="quick-desc">Headers only • 2-3 seconds</div>
-                        </div>
-                    </label>
-                    <label class="scan-mode">
-                        <input type="radio" name="scan-mode" value="deep" aria-describedby="deep-desc">
-                        <div class="mode-content">
-                            <div class="mode-title"><ion-icon name="search-outline" aria-hidden="true"></ion-icon> Deep Scan</div>
-                            <div class="mode-desc" id="deep-desc">Full analysis + AI • 10-15 seconds</div>
-                        </div>
-                    </label>
-                    <label class="scan-mode">
-                        <input type="radio" name="scan-mode" value="realtime" aria-describedby="realtime-desc">
-                        <div class="mode-content">
-                            <div class="mode-title"><ion-icon name="refresh-outline" aria-hidden="true"></ion-icon> Real-time Monitoring</div>
-                            <div class="mode-desc" id="realtime-desc">Continuous scanning • Every 30s</div>
-                        </div>
-                    </label>
-                </fieldset>
-                
-                <!-- API Configuration Info -->
-                <div class="api-info">
-                    <strong><ion-icon name="shield-outline"></ion-icon> Multi-Engine Detection:</strong>
-                    <div class="text-xs">
-                        VirusTotal (configured), PhishTank (free), URLVoid (free tier), Hybrid Analysis (free tier), Google Safe Browsing (free tier)
-                    </div>
-                </div>
-            </div>
-
-        <div id="loading" class="loading-spinner hidden"></div>
-
-            <div id="scanning-ui" class="scanning-ui hidden">
-                <div class="scanning-animation"></div>
-                <div class="scanning-text"><ion-icon name="search-outline"></ion-icon> Scanning Website...</div>
-                <div id="scanning-progress" class="scanning-progress">Initializing security analysis...</div>
-            </div>
-
-            <!-- Real-time scanning indicator -->
-            <div id="realtime-indicator" class="realtime-indicator hidden">
-                <ion-icon name="radio-button-on"></ion-icon> Real-time Scanning Active
-            </div>
-
-            <div id="results" class="results hidden">
-                <!-- Security Assessment Summary -->
-                <div class="security-assessment">
-                    <div class="assessment-header">
-                        <h2 id="security-verdict">🔍 Analyzing Security...</h2>
-                        <div id="security-score" class="security-score">Score: Calculating...</div>
-                        <div class="security-progress" aria-hidden="true">
-                            <div id="security-progress-bar" class="security-progress-bar" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    <div id="security-summary" class="security-summary">
-                        <div class="summary-item">
-                            <span class="summary-label">Overall Status:</span>
-                            <span id="overall-status" class="status-badge">Analyzing...</span>
-                        </div>
-                        <div class="summary-item">
-                            <span class="summary-label">Risk Level:</span>
-                            <span id="risk-level" class="risk-badge">Calculating...</span>
-                        </div>
-                        <div class="summary-item">
-                            <span class="summary-label">Recommendations:</span>
-                            <span id="recommendations-count">Analyzing...</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="section-title"><ion-icon name="shield-checkmark-outline"></ion-icon> General Security</div>
-            <div id="https-check" class="result-item"></div>
-            <div id="mixed-content-check" class="result-item"></div>
-            <div id="csp-check" class="result-item"></div>
-            <div id="csp-evaluator" class="result-item"></div>
-            <div id="x-frame-options-check" class="result-item"></div>
-            <div id="hsts-check" class="result-item"></div>
-            <div id="x-content-type-options-check" class="result-item"></div>
-            <div id="x-xss-protection-check" class="result-item"></div>
-            <div id="referrer-policy-check" class="result-item"></div>
-            <div id="permissions-policy-check" class="result-item"></div>
-            <div id="coop-check" class="result-item"></div>
-            <div id="corp-check" class="result-item"></div>
-
-                <div class="section-title"><ion-icon name="cookie-outline"></ion-icon> Cookie Security</div>
-                <div id="secure-cookies-check" class="result-item"></div>
-                <div id="httponly-cookies-check" class="result-item"></div>
-                <div id="samesite-cookies-check" class="result-item"></div>
-
-                <div class="section-title"><ion-icon name="document-text-outline"></ion-icon> Form Security</div>
-            <div id="form-autocomplete-check" class="result-item"></div>
-            <div id="password-type-check" class="result-item"></div>
-            <div id="password-encryption-note" class="result-item"></div>
-
-
-                <div class="section-title"><ion-icon name="bug-outline"></ion-icon> Multi-Engine Malware Detection</div>
-            <div id="suspicious-scripts-check" class="result-item"></div>
-            <div id="malware-reputation-check" class="result-item"></div>
-            
-            <!-- VirusTotal Results -->
-            <div id="virus-total-check" class="result-item"></div>
-                <div id="virus-total-link" class="hidden mb-2">
-                    <button id="view-virustotal-btn" class="btn-secondary">
-                        <ion-icon name="link-outline"></ion-icon> View Detailed Report on VirusTotal
-                    </button>
-                </div>
-            
-            <!-- PhishTank Results -->
-            <div id="phishtank-check" class="result-item"></div>
-            
-            <!-- URLVoid Results -->
-            <div id="urlvoid-check" class="result-item"></div>
-            
-            <!-- Hybrid Analysis Results -->
-            <div id="hybrid-analysis-check" class="result-item"></div>
-            
-            <!-- Google Safe Browsing Results -->
-            <div id="google-safebrowsing-check" class="result-item"></div>
-            
-            <!-- Multi-API Summary -->
-            <div id="multi-api-summary" class="result-item"></div>
-            
-            <div id="suspicious-domains-check" class="result-item"></div>
-            <div id="form-cross-origin-check" class="result-item"></div>
-            <div id="obfuscated-js-check" class="result-item"></div>
-            <div id="crypto-mining-check" class="result-item"></div>
-            <div id="sri-check" class="result-item"></div>
-
-                <div class="section-title"><ion-icon name="analytics-outline"></ion-icon> Traffic Analysis</div>
-            <div id="total-requests-check" class="result-item"></div>
-            <div id="external-requests-check" class="result-item"></div>
-            <div id="large-resources-check" class="result-item"></div>
-
-            <div class="section-title">General Security Tips for Web Apps</div>
-            <div class="tip-box">
-                <ul>
-                    <li>Always use HTTPS to encrypt communication.</li>
-                    <li>Implement a strong Content Security Policy (CSP).</li>
-                    <li>Protect against CSRF with anti-CSRF tokens.</li>
-                    <li>Use `HttpOnly` and `Secure` flags for all sensitive cookies.</li>
-                    <li>Set `X-Frame-Options` or `Content-Security-Policy: frame-ancestors` to prevent clickjacking.</li>
-                    <li>Implement `Strict-Transport-Security (HSTS)` for HTTPS enforcement.</li>
-                    <li>Use `X-Content-Type-Options: nosniff` to prevent MIME-sniffing attacks.</li>
-                    <li>Sanitize and validate all user inputs to prevent XSS and SQL Injection.</li>
-                    <li>Regularly update all frameworks and dependencies.</li>
-                    <li>Disable `DEBUG` mode and ensure `SECRET_KEY` is secure in production.</li>
-                    <li>Implement `Permissions-Policy` to control browser features.</li>
-                    <li>Consider `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` for isolation.</li>
-                    <li>Regularly review third-party scripts and external resources.</li>
-                    <li>Be cautious of forms submitting to different domains.</li>
-                    <li>Optimize resource loading to prevent high traffic and improve performance.</li>
-                    <li>**Always encrypt and hash passwords securely on the server-side.**</li>
-                </ul>
-            </div>
-
-                <div class="section-title"><ion-icon name="brain-outline"></ion-icon> AI-Powered Analysis</div>
-                <div id="ai-analysis" class="llm-output hidden"></div>
-                <div id="ai-loading" class="llm-loading-text hidden"><ion-icon name="brain-outline"></ion-icon> AI is analyzing security findings...</div>
-
-                <div class="section-title"><ion-icon name="refresh-outline"></ion-icon> Real-time Monitoring</div>
-                <div id="monitoring-toggle" class="result-item">
-                    <span class="icon info-icon"><ion-icon name="refresh-outline"></ion-icon></span>
-                    <span class="result-text">Real-time monitoring: <span id="monitoring-status">OFF</span></span>
-                </div>
-
-                <div class="section-title"><ion-icon name="time-outline"></ion-icon> Security History</div>
-                <div id="security-history" class="result-item"></div>
-
-                <div class="section-title"><ion-icon name="document-outline"></ion-icon> Report Generation</div>
-                <div id="download-report-btn" class="result-item">
-                    <span class="icon info-icon"><ion-icon name="document-outline"></ion-icon></span>
-                    <button class="btn-download"><ion-icon name="download-outline"></ion-icon> Download Security Report (PDF)</button>
-                </div>
-                <div id="pdf-loading" class="pdf-loading-text hidden"><ion-icon name="document-outline"></ion-icon> Generating PDF report...</div>
-        </div>
+  <div class="container">
+    <div class="header">
+      <span class="version-badge">v2.0</span>
+      <div class="header-controls">
+        <button class="icon-btn" id="darkModeToggle" title="Toggle Dark Mode">🌙</button>
+        <button class="icon-btn" id="historyBtn" title="Scan History">📊</button>
+        <button class="icon-btn" id="exportBtn" title="Export Results">💾</button>
+      </div>
+      <h1><span>🛡️</span> Security Scanner</h1>
+      <p>Advanced Security & Privacy Analysis</p>
     </div>
-    
-    <!-- Security History Modal -->
-    <div id="historyModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-4 max-w-lg w-full max-h-[80vh] overflow-y-auto">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold">Security Scan Details</h3>
-                <button id="closeHistoryModal" class="text-gray-500 hover:text-gray-700">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
-            </div>
-            <div id="historyModalContent" class="text-sm">
-                <!-- Modal content will be inserted here -->
-            </div>
+    <div class="content">
+      <div class="api-section">
+        <input type="password" id="apiKey">
+      </div>
+      <div class="current-url" id="currentUrl">Loading current URL...</div>
+      <div class="scan-options">
+        <h3>Select Security Checks</h3>
+        <button class="select-all-btn" id="selectAllBtn">Select All</button>
+        <div class="checkbox-grid">
+          <div class="checkbox-item">
+            <input type="checkbox" id="check-phishing" checked>
+            <label for="check-phishing">🎣 Phishing</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="check-malware" checked>
+            <label for="check-malware">🦠 Malware</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="check-https" checked>
+            <label for="check-https">🔒 HTTPS/SSL</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="check-security" checked>
+            <label for="check-security">🛡️ Headers</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="check-cookies" checked>
+            <label for="check-cookies">🍪 Cookies</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="check-mixed" checked>
+            <label for="check-mixed">⚠️ Mixed Content</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="check-traffic" checked>
+            <label for="check-traffic">🚦 Traffic</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="check-privacy" checked>
+            <label for="check-privacy">🔐 Privacy</label>
+          </div>
         </div>
+      </div>
+      <button class="btn btn-primary" id="startScanBtn">
+        <span id="scanBtnText">Start Security Scan</span>
+      </button>
+      <div class="progress-section" id="progressSection">
+        <div class="progress-bar-container">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="progress-text" id="progressText">Initializing scan...</div>
+      </div>
+      <div class="results-section" id="resultsSection">
+        <div id="resultsContent"></div>
+        <div class="action-buttons">
+          <button class="btn btn-secondary" id="generatePdfBtn">📄 PDF Report</button>
+        </div>
+      </div>
     </div>
-    
-    <!-- Ionic Icons -->
-    <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
-    <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
-    
-    <!-- jsPDF library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="popup.js"></script>
+  </div>
+  <script src="jspdf.umd.min.js"></script>
+  <script src="popup.js"></script>
 </body>
+
 </html>
