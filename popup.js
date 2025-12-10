@@ -5,6 +5,8 @@ let currentTab = null;
 let scanResults = {};
 let geminiApiKey = '';
 let darkMode = false;
+let monitoringEnabled = false;
+let statsRefreshInterval = null;
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
@@ -51,7 +53,6 @@ function setupEventListeners() {
 
     document.getElementById('selectAllBtn').addEventListener('click', toggleSelectAll);
     document.getElementById('startScanBtn').addEventListener('click', startScan);
-    document.getElementById('generatePdfBtn').addEventListener('click', generatePDF);
 
     const darkModeToggle = document.getElementById('darkModeToggle');
     if (darkModeToggle) {
@@ -67,6 +68,18 @@ function setupEventListeners() {
     if (historyBtn) {
         historyBtn.addEventListener('click', showScanHistory);
     }
+
+    const monitoringToggle = document.getElementById('monitoringToggle');
+    if (monitoringToggle) {
+        monitoringToggle.addEventListener('change', toggleMonitoring);
+    }
+
+    // Listen for suspicious domain alerts from background
+    chrome.runtime.onMessage.addListener((message) => {
+        if (message.action === 'suspiciousDomainAlert') {
+            showSuspiciousAlert(message.domain, message.reason, message.severity);
+        }
+    });
 }
 
 async function saveApiKey(e) {
@@ -109,7 +122,8 @@ async function startScan() {
         cookies: document.getElementById('check-cookies')?.checked || true,
         mixedContent: document.getElementById('check-mixed')?.checked || true,
         privacy: document.getElementById('check-privacy')?.checked || true,
-        phishing: document.getElementById('check-phishing')?.checked || true
+        phishing: document.getElementById('check-phishing')?.checked || true,
+        javascript: document.getElementById('check-javascript')?.checked || true
     };
 
     if (!Object.values(checks).some(v => v)) {
@@ -144,6 +158,7 @@ async function startScan() {
         if (checks.mixedContent) await runCheck('Mixed Content Check', performMixedContentCheck, increment, progress += increment);
         if (checks.traffic) await runCheck('Traffic Analysis', performTrafficAnalysis, increment, progress += increment);
         if (checks.privacy) await runCheck('Privacy Analysis', performPrivacyAnalysis, increment, progress += increment);
+        if (checks.javascript) await runCheck('JavaScript Security', performJavaScriptSecurityCheck, increment, progress += increment);
 
         updateProgress(100, 'Calculating scores...');
 
@@ -361,6 +376,97 @@ async function performPrivacyAnalysis() {
     });
 }
 
+async function performJavaScriptSecurityCheck() {
+    const result = await executeScript(detectDangerousJavaScript);
+    const data = result || { detected: false, totalIssues: 0, riskLevel: 'low', patterns: {}, issues: [] };
+
+    let severity = 'success';
+    if (data.riskLevel === 'critical') severity = 'critical';
+    else if (data.riskLevel === 'high') severity = 'critical';
+    else if (data.riskLevel === 'medium') severity = 'warning';
+    else if (data.detected) severity = 'info';
+
+    const details = [];
+    if (data.patterns.cryptoMining > 0) {
+        details.push(`⚠️ CRYPTO-MINING DETECTED (${data.patterns.cryptoMining} script(s))`);
+    }
+    if (data.patterns.evalUsage > 0) {
+        details.push(`${data.patterns.evalUsage} eval() or similar usage`);
+    }
+    if (data.patterns.obfuscated > 0) {
+        details.push(`${data.patterns.obfuscated} obfuscated script(s)`);
+    }
+    if (data.patterns.inlineScripts > 0) {
+        details.push(`${data.patterns.inlineScripts} inline script(s)`);
+    }
+    if (data.patterns.documentWrite > 0) {
+        details.push(`${data.patterns.documentWrite} document.write() usage`);
+    }
+    if (data.patterns.inlineHandlers > 0) {
+        details.push(`${data.patterns.inlineHandlers} inline event handler(s)`);
+    }
+
+    const detailsText = details.length > 0 ? details.join(', ') : 'No dangerous JavaScript patterns detected';
+
+    scanResults.checks.push({
+        category: 'JavaScript Security',
+        severity: severity,
+        details: `${data.totalIssues} issue(s) found. ${detailsText}`,
+        data: data
+    });
+}
+
+// Helper function to detect dangerous JavaScript (injected into page)
+function detectDangerousJavaScript() {
+    const issues = [];
+    const patterns = {
+        inlineScripts: 0,
+        evalUsage: 0,
+        documentWrite: 0,
+        obfuscated: 0,
+        cryptoMining: 0,
+        inlineHandlers: 0
+    };
+
+    // Count inline scripts
+    const inlineScripts = document.querySelectorAll('script:not([src])');
+    patterns.inlineScripts = inlineScripts.length;
+
+    // Count inline handlers
+    const inlineHandlers = document.querySelectorAll('[onclick], [onerror], [onload], [onmouseover], [onfocus]');
+    patterns.inlineHandlers = inlineHandlers.length;
+
+    // Analyze scripts
+    const allScripts = document.querySelectorAll('script');
+    allScripts.forEach((script) => {
+        const scriptContent = script.textContent || script.innerText || '';
+        if (scriptContent.length === 0) return;
+
+        if (/\beval\s*\(/.test(scriptContent)) patterns.evalUsage++;
+        if (/document\.write/.test(scriptContent)) patterns.documentWrite++;
+        if (/coinhive|cryptoloot|webminer|monero/i.test(scriptContent)) patterns.cryptoMining++;
+
+        // Simple obfuscation check
+        const hasHexEscape = (scriptContent.match(/\\x[0-9a-fA-F]{2}/g) || []).length > 20;
+        const hasBase64 = /[A-Za-z0-9+/]{50,}={0,2}/.test(scriptContent);
+        if (hasHexEscape || hasBase64) patterns.obfuscated++;
+    });
+
+    const totalIssues = Object.values(patterns).reduce((a, b) => a + b, 0);
+    let riskLevel = 'low';
+    if (patterns.cryptoMining > 0) riskLevel = 'critical';
+    else if (patterns.evalUsage > 2 || patterns.obfuscated > 2) riskLevel = 'high';
+    else if (totalIssues > 10) riskLevel = 'medium';
+
+    return {
+        detected: totalIssues > 0,
+        riskLevel: riskLevel,
+        totalIssues: totalIssues,
+        patterns: patterns,
+        issues: issues
+    };
+}
+
 // Helper to run content script functions
 async function executeScript(func) {
     const result = await chrome.scripting.executeScript({
@@ -574,10 +680,115 @@ function generateSuggestions(check) {
         'Cookie Security': 'Clear insecure cookies or use incognito mode.',
         'Mixed Content': 'The site should serve all resources over HTTPS.',
         'Privacy Analysis': 'Consider using privacy-focused browser extensions or VPN.',
-        'Traffic Analysis': 'High resource count may indicate tracking or poor optimization.'
+        'Traffic Analysis': 'High resource count may indicate tracking or poor optimization.',
+        'JavaScript Security': 'Dangerous JavaScript patterns detected. Avoid entering sensitive data. Consider using a script blocker.'
     };
 
     return suggestions[check.category] || 'Review security settings.';
+}
+
+// Real-Time Monitoring Functions
+
+async function toggleMonitoring() {
+    const toggle = document.getElementById('monitoringToggle');
+    monitoringEnabled = toggle.checked;
+
+    if (monitoringEnabled) {
+        // Start monitoring
+        const response = await chrome.runtime.sendMessage({
+            action: 'startMonitoring',
+            tabId: currentTab.id
+        });
+
+        if (response.success) {
+            document.getElementById('monitoringStats').style.display = 'grid';
+            document.getElementById('monitoringIndicator').textContent = '🟢';
+            document.getElementById('monitoringIndicator').classList.add('monitoring-active');
+
+            // Start auto-refresh
+            startStatsRefresh();
+        } else {
+            alert('Failed to start monitoring: ' + response.error);
+            toggle.checked = false;
+        }
+    } else {
+        // Stop monitoring
+        const response = await chrome.runtime.sendMessage({
+            action: 'stopMonitoring'
+        });
+
+        document.getElementById('monitoringStats').style.display = 'none';
+        document.getElementById('monitoringIndicator').textContent = '🔴';
+        document.getElementById('monitoringIndicator').classList.remove('monitoring-active');
+        document.getElementById('alertContainer').innerHTML = '';
+
+        // Stop auto-refresh
+        stopStatsRefresh();
+    }
+}
+
+function startStatsRefresh() {
+    // Update stats every second
+    statsRefreshInterval = setInterval(updateMonitoringStats, 1000);
+    updateMonitoringStats(); // Initial update
+}
+
+function stopStatsRefresh() {
+    if (statsRefreshInterval) {
+        clearInterval(statsRefreshInterval);
+        statsRefreshInterval = null;
+    }
+}
+
+async function updateMonitoringStats() {
+    try {
+        const response = await chrome.runtime.sendMessage({
+            action: 'getMonitoringStats'
+        });
+
+        if (response.enabled && response.stats) {
+            const stats = response.stats;
+
+            // Update request count
+            document.getElementById('requestCount').textContent = stats.totalRequests;
+
+            // Update blocked count
+            document.getElementById('blockedCount').textContent =
+                `${stats.blockedRequests} (${stats.blockedPercentage}%)`;
+
+            // Update data flow
+            const dataKB = (stats.bytesReceived / 1024).toFixed(1);
+            const dataMB = (stats.bytesReceived / 1024 / 1024).toFixed(2);
+            document.getElementById('dataFlow').textContent =
+                stats.bytesReceived > 1024 * 1024 ? `${dataMB} MB` : `${dataKB} KB`;
+        }
+    } catch (error) {
+        console.error('Error updating monitoring stats:', error);
+    }
+}
+
+function showSuspiciousAlert(domain, reason, severity) {
+    const alertContainer = document.getElementById('alertContainer');
+
+    // Check if alert for this domain already exists
+    if (alertContainer.querySelector(`[data-domain="${domain}"]`)) {
+        return;
+    }
+
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert-item ${severity}`;
+    alertDiv.setAttribute('data-domain', domain);
+    alertDiv.innerHTML = `
+        <strong>${severity === 'critical' ? '🚨' : '⚠️'} ${domain}</strong>
+        ${reason}
+    `;
+
+    alertContainer.insertBefore(alertDiv, alertContainer.firstChild);
+
+    // Keep only last 5 alerts
+    while (alertContainer.children.length > 5) {
+        alertContainer.removeChild(alertContainer.lastChild);
+    }
 }
 
 // Export Functions
@@ -696,95 +907,3 @@ function updateHistoryPreview(history) {
     preview.innerHTML = `Last scan: ${new Date(history[0].timestamp).toLocaleString()}`;
 }
 
-// PDF Generation (Enhanced with better download support)
-async function generatePDF() {
-    try {
-        // Check if jsPDF is loaded
-        if (!window.jspdf) {
-            alert('PDF library is loading... Please try again in a moment.');
-            return;
-        }
-
-        const { jsPDF } = window.jspdf;
-
-        if (!jsPDF) {
-            alert('PDF generation library not available. Please reload the extension.');
-            return;
-        }
-
-        // Check if scan results exist
-        if (!scanResults || !scanResults.checks || scanResults.checks.length === 0) {
-            alert('No scan results available. Please run a scan first.');
-            return;
-        }
-
-        const doc = new jsPDF();
-
-        // Title
-        doc.setFontSize(20);
-        doc.setTextColor(102, 126, 234);
-        doc.text('Website Security Report', 20, 20);
-
-        // Metadata
-        doc.setFontSize(12);
-        doc.setTextColor(0, 0, 0);
-        doc.text(`URL: ${scanResults.url}`, 20, 35);
-        doc.text(`Date: ${new Date(scanResults.timestamp).toLocaleString()}`, 20, 42);
-
-        // Scores
-        doc.setFontSize(16);
-        doc.text('Security Assessment', 20, 55);
-        doc.setFontSize(12);
-        doc.text(`Overall Score: ${scanResults.scores.overall}/100 (${getGrade(scanResults.scores.overall)})`, 20, 65);
-        doc.text(`Security: ${scanResults.scores.security}/100 (${getGrade(scanResults.scores.security)})`, 20, 72);
-        doc.text(`Privacy: ${scanResults.scores.privacy}/100 (${getGrade(scanResults.scores.privacy)})`, 20, 79);
-
-        // Detailed Results
-        let y = 95;
-        doc.setFontSize(14);
-        doc.text('Detailed Results', 20, y);
-        y += 10;
-
-        scanResults.checks.forEach(check => {
-            if (y > 270) {
-                doc.addPage();
-                y = 20;
-            }
-
-            doc.setFontSize(12);
-            doc.setTextColor(check.severity === 'critical' ? [255, 0, 0] : [0, 0, 0]);
-            doc.text(`${check.category} [${check.severity.toUpperCase()}]`, 20, y);
-
-            doc.setFontSize(10);
-            doc.setTextColor(50, 50, 50);
-            const lines = doc.splitTextToSize(check.details, 170);
-            doc.text(lines, 20, y + 7);
-
-            y += 15 + (lines.length * 5);
-        });
-
-        // Generate filename with timestamp
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-        const filename = `security-report-${timestamp}.pdf`;
-
-        // Save the PDF (triggers download)
-        doc.save(filename);
-
-        // Show success message
-        console.log('PDF generated successfully:', filename);
-
-        // Show a brief success indicator
-        const btn = document.getElementById('generatePdfBtn');
-        const originalText = btn.textContent;
-        btn.textContent = '✓ PDF Downloaded!';
-        btn.style.background = '#10b981';
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.style.background = '';
-        }, 2000);
-
-    } catch (error) {
-        console.error('PDF generation error:', error);
-        alert(`Failed to generate PDF: ${error.message}\n\nPlease try again or use the export options instead.`);
-    }
-}

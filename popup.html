@@ -560,6 +560,193 @@
       padding: 2px 6px;
       border-radius: 10px;
     }
+
+    /* Real-Time Monitoring Styles */
+    .monitoring-section {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border: 2px solid #e0e0e0;
+    }
+
+    body.dark-mode .monitoring-section {
+      background: #1a1a2e;
+      border-color: #2a2a3e;
+    }
+
+    .monitoring-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+
+    .monitoring-header h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    body.dark-mode .monitoring-header h3 {
+      color: #e0e0e0;
+    }
+
+    /* Toggle Switch */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 48px;
+      height: 24px;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: 0.3s;
+      border-radius: 24px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+
+    input:checked+.slider {
+      background-color: #ef4444;
+    }
+
+    input:checked+.slider:before {
+      transform: translateX(24px);
+    }
+
+    /* Monitoring Stats */
+    .monitoring-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+
+    .stat-item {
+      background: white;
+      padding: 10px;
+      border-radius: 6px;
+      text-align: center;
+      border: 1px solid #e0e0e0;
+    }
+
+    body.dark-mode .stat-item {
+      background: #0f0f23;
+      border-color: #2a2a3e;
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 10px;
+      color: #666;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    body.dark-mode .stat-label {
+      color: #b0b0b0;
+    }
+
+    .stat-value {
+      display: block;
+      font-size: 20px;
+      font-weight: bold;
+      color: #667eea;
+    }
+
+    .stat-value.blocked {
+      color: #ef4444;
+    }
+
+    .stat-value.data {
+      color: #10b981;
+    }
+
+    /* Pulsing animation for active monitoring */
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.6;
+      }
+    }
+
+    .monitoring-active {
+      animation: pulse 2s infinite;
+    }
+
+    /* Alert Container */
+    .alert-container {
+      margin-top: 10px;
+    }
+
+    .alert-item {
+      padding: 10px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+      border-left: 4px solid;
+      font-size: 11px;
+      animation: slideIn 0.3s ease;
+    }
+
+    .alert-item.critical {
+      background: #fff5f5;
+      border-color: #ef4444;
+      color: #991b1b;
+    }
+
+    body.dark-mode .alert-item.critical {
+      background: #2d1515;
+      color: #fca5a5;
+    }
+
+    .alert-item.warning {
+      background: #fffbeb;
+      border-color: #f59e0b;
+      color: #92400e;
+    }
+
+    body.dark-mode .alert-item.warning {
+      background: #2d2515;
+      color: #fcd34d;
+    }
+
+    .alert-item strong {
+      display: block;
+      margin-bottom: 4px;
+    }
   </style>
 </head>
 
@@ -580,6 +767,35 @@
         <input type="password" id="apiKey">
       </div>
       <div class="current-url" id="currentUrl">Loading current URL...</div>
+
+      <!-- Real-Time Monitoring Section -->
+      <div class="monitoring-section">
+        <div class="monitoring-header">
+          <h3><span id="monitoringIndicator">🔴</span> Real-Time Monitoring</h3>
+          <label class="toggle-switch">
+            <input type="checkbox" id="monitoringToggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="monitoring-stats" id="monitoringStats" style="display: none;">
+          <div class="stat-item">
+            <span class="stat-label">Requests</span>
+            <span class="stat-value" id="requestCount">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Blocked</span>
+            <span class="stat-value blocked" id="blockedCount">0</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Data Flow</span>
+            <span class="stat-value data" id="dataFlow">0 KB</span>
+          </div>
+        </div>
+
+        <div class="alert-container" id="alertContainer"></div>
+      </div>
+
       <div class="scan-options">
         <h3>Select Security Checks</h3>
         <button class="select-all-btn" id="selectAllBtn">Select All</button>
@@ -616,6 +832,10 @@
             <input type="checkbox" id="check-privacy" checked>
             <label for="check-privacy">🔐 Privacy</label>
           </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="check-javascript" checked>
+            <label for="check-javascript">⚡ JavaScript</label>
+          </div>
         </div>
       </div>
       <button class="btn btn-primary" id="startScanBtn">
@@ -629,13 +849,11 @@
       </div>
       <div class="results-section" id="resultsSection">
         <div id="resultsContent"></div>
-        <div class="action-buttons">
-          <button class="btn btn-secondary" id="generatePdfBtn">📄 PDF Report</button>
-        </div>
+
       </div>
     </div>
   </div>
-  <script src="jspdf.umd.min.js"></script>
+
   <script src="popup.js"></script>
 </body>
 

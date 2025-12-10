@@ -36,6 +36,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse(checkIframeSecurity());
       break;
 
+    case 'detectDangerousJavaScript':
+      sendResponse(detectDangerousJavaScript());
+      break;
+
     case 'getSecurityMetrics':
       // Consolidated metrics for comprehensive analysis
       sendResponse({
@@ -46,7 +50,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         formSecurity: analyzeFormSecurity(),
         thirdParty: getThirdPartyResources(),
         fingerprinting: detectFingerprinting(),
-        iframes: checkIframeSecurity()
+        iframes: checkIframeSecurity(),
+        dangerousJavaScript: detectDangerousJavaScript()
       });
       break;
   }
@@ -406,6 +411,245 @@ function checkIframeSecurity() {
     insecureIframes: insecureIframes,
     issues: issues,
     isSecure: issues.filter(i => i.severity === 'high').length === 0
+  };
+}
+
+/**
+ * Detect Dangerous JavaScript Patterns
+ * Analyzes scripts for security risks and malicious patterns
+ */
+function detectDangerousJavaScript() {
+  const issues = [];
+  const patterns = {
+    inlineScripts: 0,
+    evalUsage: 0,
+    documentWrite: 0,
+    obfuscated: 0,
+    cryptoMining: 0,
+    inlineHandlers: 0
+  };
+
+  // 1. Detect Inline Scripts (unsafe-inline)
+  const inlineScripts = document.querySelectorAll('script:not([src])');
+  patterns.inlineScripts = inlineScripts.length;
+
+  if (inlineScripts.length > 0) {
+    issues.push({
+      type: 'inline-scripts',
+      severity: inlineScripts.length > 10 ? 'high' : 'medium',
+      count: inlineScripts.length,
+      description: `${inlineScripts.length} inline script(s) detected (CSP unsafe-inline risk)`
+    });
+  }
+
+  // 2. Detect Inline Event Handlers
+  const inlineHandlers = document.querySelectorAll('[onclick], [onerror], [onload], [onmouseover], [onfocus]');
+  patterns.inlineHandlers = inlineHandlers.length;
+
+  if (inlineHandlers.length > 0) {
+    issues.push({
+      type: 'inline-handlers',
+      severity: 'medium',
+      count: inlineHandlers.length,
+      description: `${inlineHandlers.length} inline event handler(s) found`
+    });
+  }
+
+  // 3. Analyze Script Content for Dangerous Patterns
+  const allScripts = document.querySelectorAll('script');
+  allScripts.forEach((script, index) => {
+    const scriptContent = script.textContent || script.innerText || '';
+
+    if (scriptContent.length === 0) return;
+
+    // Detect eval() usage
+    if (/\beval\s*\(/.test(scriptContent)) {
+      patterns.evalUsage++;
+      issues.push({
+        type: 'eval-usage',
+        severity: 'high',
+        scriptIndex: index,
+        description: 'eval() function detected (code injection risk)'
+      });
+    }
+
+    // Detect Function constructor
+    if (/new\s+Function\s*\(/.test(scriptContent)) {
+      patterns.evalUsage++;
+      issues.push({
+        type: 'function-constructor',
+        severity: 'high',
+        scriptIndex: index,
+        description: 'Function() constructor detected (similar to eval)'
+      });
+    }
+
+    // Detect setTimeout/setInterval with string arguments
+    if (/setTimeout\s*\(\s*['"`]|setInterval\s*\(\s*['"`]/.test(scriptContent)) {
+      patterns.evalUsage++;
+      issues.push({
+        type: 'string-timeout',
+        severity: 'medium',
+        scriptIndex: index,
+        description: 'setTimeout/setInterval with string argument (eval-like behavior)'
+      });
+    }
+
+    // Detect document.write()
+    if (/document\.write(ln)?\s*\(/.test(scriptContent)) {
+      patterns.documentWrite++;
+      issues.push({
+        type: 'document-write',
+        severity: 'medium',
+        scriptIndex: index,
+        description: 'document.write() detected (can break page rendering)'
+      });
+    }
+
+    // Detect Obfuscated Code
+    const obfuscationScore = detectObfuscation(scriptContent);
+    if (obfuscationScore > 3) {
+      patterns.obfuscated++;
+      issues.push({
+        type: 'obfuscated-code',
+        severity: obfuscationScore > 5 ? 'high' : 'medium',
+        scriptIndex: index,
+        score: obfuscationScore,
+        description: `Highly obfuscated code detected (score: ${obfuscationScore}/10)`
+      });
+    }
+
+    // Detect Crypto-Mining Signatures
+    const miningIndicators = detectCryptoMining(scriptContent);
+    if (miningIndicators.detected) {
+      patterns.cryptoMining++;
+      issues.push({
+        type: 'crypto-mining',
+        severity: 'critical',
+        scriptIndex: index,
+        indicators: miningIndicators.patterns,
+        description: `Potential crypto-mining detected: ${miningIndicators.patterns.join(', ')}`
+      });
+    }
+  });
+
+  // Calculate risk level
+  const criticalCount = issues.filter(i => i.severity === 'critical').length;
+  const highCount = issues.filter(i => i.severity === 'high').length;
+  const mediumCount = issues.filter(i => i.severity === 'medium').length;
+
+  let riskLevel = 'low';
+  if (criticalCount > 0) riskLevel = 'critical';
+  else if (highCount > 2) riskLevel = 'high';
+  else if (highCount > 0 || mediumCount > 5) riskLevel = 'medium';
+
+  return {
+    detected: issues.length > 0,
+    riskLevel: riskLevel,
+    totalIssues: issues.length,
+    patterns: patterns,
+    issues: issues,
+    summary: {
+      critical: criticalCount,
+      high: highCount,
+      medium: mediumCount,
+      low: issues.filter(i => i.severity === 'low').length
+    }
+  };
+}
+
+/**
+ * Detect Code Obfuscation
+ * Returns a score from 0-10 indicating obfuscation level
+ */
+function detectObfuscation(code) {
+  let score = 0;
+
+  // High entropy (random-looking variable names)
+  const varNames = code.match(/\b[a-zA-Z_$][a-zA-Z0-9_$]{0,2}\b/g) || [];
+  const shortVarRatio = varNames.filter(v => v.length <= 2).length / Math.max(varNames.length, 1);
+  if (shortVarRatio > 0.5) score += 2;
+
+  // Excessive escape sequences
+  const escapeCount = (code.match(/\\x[0-9a-fA-F]{2}/g) || []).length;
+  const unicodeCount = (code.match(/\\u[0-9a-fA-F]{4}/g) || []).length;
+  if (escapeCount + unicodeCount > 20) score += 2;
+
+  // Hex encoded strings
+  if (/0x[0-9a-fA-F]{2,}/g.test(code)) score += 1;
+
+  // Base64 patterns
+  const base64Matches = code.match(/[A-Za-z0-9+/]{40,}={0,2}/g) || [];
+  if (base64Matches.length > 3) score += 2;
+
+  // String concatenation patterns (obfuscation technique)
+  const concatCount = (code.match(/['"][^'"]{1,3}['"]\s*\+\s*['"][^'"]{1,3}['"]/g) || []).length;
+  if (concatCount > 10) score += 1;
+
+  // Array-based string construction
+  if (/\[[^\]]{50,}\]\.join\s*\(/.test(code)) score += 2;
+
+  // Excessive use of String.fromCharCode
+  if ((code.match(/String\.fromCharCode/g) || []).length > 5) score += 2;
+
+  return Math.min(score, 10);
+}
+
+/**
+ * Detect Crypto-Mining Signatures
+ * Checks for known mining libraries and patterns
+ */
+function detectCryptoMining(code) {
+  const patterns = [];
+
+  // Known mining library names
+  const miningLibs = [
+    'coinhive', 'cryptoloot', 'coin-hive', 'jsecoin', 'minero',
+    'crypto-loot', 'webminer', 'cryptonight', 'monero'
+  ];
+
+  for (const lib of miningLibs) {
+    if (new RegExp(lib, 'i').test(code)) {
+      patterns.push(`Mining library: ${lib}`);
+    }
+  }
+
+  // Mining pool domains
+  const miningDomains = [
+    'coinhive.com', 'coin-hive.com', 'crypto-loot.com', 'jsecoin.com',
+    'webminepool.com', 'minero.cc', 'cryptoloot.pro'
+  ];
+
+  for (const domain of miningDomains) {
+    if (code.includes(domain)) {
+      patterns.push(`Mining pool: ${domain}`);
+    }
+  }
+
+  // WebAssembly with suspicious patterns
+  if (/WebAssembly\.instantiate|\.wasm/.test(code)) {
+    if (/worker|thread|hash|mine/i.test(code)) {
+      patterns.push('Suspicious WebAssembly usage');
+    }
+  }
+
+  // Worker threads with mining indicators
+  if (/new\s+Worker/.test(code)) {
+    if (/hash|nonce|difficulty|target/i.test(code)) {
+      patterns.push('Worker thread with mining indicators');
+    }
+  }
+
+  // Cryptographic hash functions (common in mining)
+  if (/SHA256|keccak|blake2b|cryptonight/i.test(code)) {
+    if (/loop|while|setInterval/.test(code)) {
+      patterns.push('Hash function in loop (mining pattern)');
+    }
+  }
+
+  return {
+    detected: patterns.length > 0,
+    patterns: patterns
   };
 }
 

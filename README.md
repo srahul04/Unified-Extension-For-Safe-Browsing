@@ -38,7 +38,7 @@
   - **1** = JSON (full data)
   - **2** = CSV (spreadsheet)
   - **3** = HTML (standalone report)
-- Or use **PDF Report** button for professional PDF
+
 
 ### 🔍 Security Checks
 
@@ -75,6 +75,13 @@
 - Detects trackers (Google Analytics, Facebook, etc.)
 - Finds fingerprinting attempts
 - Calculates privacy score
+
+**JavaScript Security** ⚡
+- Detects inline scripts (CSP unsafe-inline)
+- Identifies eval() and Function() usage
+- Finds document.write() calls
+- Detects obfuscated code patterns
+- Scans for crypto-mining signatures
 
 ## Testing Different Sites
 

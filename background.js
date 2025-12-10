@@ -4,6 +4,21 @@
 // Store headers from web requests
 const headersCache = new Map();
 
+// Real-Time Monitoring State
+let monitoringState = {
+  enabled: false,
+  tabId: null,
+  stats: {
+    totalRequests: 0,
+    blockedRequests: 0,
+    bytesReceived: 0,
+    bytesSent: 0,
+    suspiciousDomains: [],
+    requestLog: []
+  },
+  startTime: null
+};
+
 // Listen for web request completion to capture headers
 chrome.webRequest.onCompleted.addListener(
   (details) => {
@@ -214,12 +229,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
       break;
 
+    case 'startMonitoring':
+      startMonitoring(request.tabId).then(result => {
+        sendResponse(result);
+      });
+      return true;
+
+    case 'stopMonitoring':
+      stopMonitoring().then(result => {
+        sendResponse(result);
+      });
+      return true;
+
+    case 'getMonitoringStats':
+      sendResponse(getMonitoringStats());
+      break;
+
+    case 'clearMonitoringStats':
+      clearMonitoringStats();
+      sendResponse({ success: true });
+      break;
+
     default:
       console.warn('Unknown action:', request.action);
       sendResponse({ error: 'Unknown action' });
   }
-
-  return true;
 });
 
 /**
@@ -495,6 +529,121 @@ async function saveScanResult(scanData) {
 }
 
 /**
+ * Real-Time Monitoring Functions
+ */
+
+async function startMonitoring(tabId) {
+  try {
+    monitoringState.enabled = true;
+    monitoringState.tabId = tabId;
+    monitoringState.startTime = Date.now();
+    monitoringState.stats = {
+      totalRequests: 0,
+      blockedRequests: 0,
+      bytesReceived: 0,
+      bytesSent: 0,
+      suspiciousDomains: [],
+      requestLog: []
+    };
+
+    // Update badge to show monitoring is active
+    chrome.action.setBadgeText({ text: '●', tabId: tabId });
+    chrome.action.setBadgeBackgroundColor({ color: '#ef4444', tabId: tabId });
+
+    console.log('Real-time monitoring started for tab:', tabId);
+    return { success: true, message: 'Monitoring started' };
+  } catch (error) {
+    console.error('Error starting monitoring:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function stopMonitoring() {
+  try {
+    const tabId = monitoringState.tabId;
+    monitoringState.enabled = false;
+    monitoringState.tabId = null;
+
+    // Clear badge
+    if (tabId) {
+      chrome.action.setBadgeText({ text: '', tabId: tabId });
+    }
+
+    console.log('Real-time monitoring stopped');
+    return { success: true, message: 'Monitoring stopped' };
+  } catch (error) {
+    console.error('Error stopping monitoring:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+function getMonitoringStats() {
+  if (!monitoringState.enabled) {
+    return {
+      enabled: false,
+      stats: null
+    };
+  }
+
+  const uptime = Date.now() - monitoringState.startTime;
+  const requestsPerSecond = monitoringState.stats.totalRequests / (uptime / 1000);
+
+  return {
+    enabled: true,
+    tabId: monitoringState.tabId,
+    uptime: uptime,
+    stats: {
+      ...monitoringState.stats,
+      requestsPerSecond: requestsPerSecond.toFixed(2),
+      blockedPercentage: monitoringState.stats.totalRequests > 0
+        ? ((monitoringState.stats.blockedRequests / monitoringState.stats.totalRequests) * 100).toFixed(1)
+        : 0
+    }
+  };
+}
+
+function clearMonitoringStats() {
+  monitoringState.stats = {
+    totalRequests: 0,
+    blockedRequests: 0,
+    bytesReceived: 0,
+    bytesSent: 0,
+    suspiciousDomains: [],
+    requestLog: []
+  };
+  monitoringState.startTime = Date.now();
+}
+
+function checkSuspiciousDomain(url) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+
+    // Check against malware domains
+    const isMalware = knownMalwareDomains.some(domain => hostname.includes(domain));
+    if (isMalware) {
+      return { suspicious: true, reason: 'Known malware domain', severity: 'critical' };
+    }
+
+    // Check against tracker domains
+    const isTracker = TRACKER_DOMAINS.some(domain => hostname.includes(domain));
+    if (isTracker) {
+      return { suspicious: true, reason: 'Tracking domain', severity: 'warning' };
+    }
+
+    // Check phishing indicators
+    const phishingCheck = checkPhishingIndicators(url);
+    if (phishingCheck.riskScore >= 50) {
+      return { suspicious: true, reason: 'Phishing indicators detected', severity: 'critical' };
+    }
+
+    return { suspicious: false };
+  } catch (error) {
+    return { suspicious: false };
+  }
+}
+
+/**
  * Get Scan History
  */
 async function getScanHistory(limit = 10) {
@@ -552,6 +701,7 @@ chrome.webRequest.onBeforeRequest.addListener(
     const tabId = details.tabId;
     if (tabId < 0) return;
 
+    // Update network stats
     if (!networkStats.has(tabId)) {
       networkStats.set(tabId, {
         requestCount: 0,
@@ -566,8 +716,54 @@ chrome.webRequest.onBeforeRequest.addListener(
 
     const type = details.type || 'other';
     stats.requestTypes[type] = (stats.requestTypes[type] || 0) + 1;
+
+    // Real-time monitoring logic
+    if (monitoringState.enabled && tabId === monitoringState.tabId) {
+      monitoringState.stats.totalRequests++;
+
+      // Check for suspicious domains
+      const suspiciousCheck = checkSuspiciousDomain(details.url);
+      if (suspiciousCheck.suspicious) {
+        const domain = new URL(details.url).hostname;
+
+        // Add to suspicious domains list if not already there
+        if (!monitoringState.stats.suspiciousDomains.find(d => d.domain === domain)) {
+          monitoringState.stats.suspiciousDomains.push({
+            domain: domain,
+            reason: suspiciousCheck.reason,
+            severity: suspiciousCheck.severity,
+            timestamp: Date.now()
+          });
+
+          // Send alert to popup
+          chrome.runtime.sendMessage({
+            action: 'suspiciousDomainAlert',
+            domain: domain,
+            reason: suspiciousCheck.reason,
+            severity: suspiciousCheck.severity
+          }).catch(() => { }); // Ignore if popup is closed
+
+          // Block if critical
+          if (suspiciousCheck.severity === 'critical') {
+            monitoringState.stats.blockedRequests++;
+            return { cancel: true };
+          }
+        }
+      }
+
+      // Add to request log (keep last 100)
+      monitoringState.stats.requestLog.unshift({
+        url: details.url,
+        type: details.type,
+        timestamp: Date.now()
+      });
+      if (monitoringState.stats.requestLog.length > 100) {
+        monitoringState.stats.requestLog.pop();
+      }
+    }
   },
-  { urls: ["<all_urls>"] }
+  { urls: ["<all_urls>"] },
+  ["blocking"]
 );
 
 chrome.webRequest.onCompleted.addListener(
@@ -581,7 +777,13 @@ chrome.webRequest.onCompleted.addListener(
         h => h.name.toLowerCase() === 'content-length'
       );
       if (contentLength) {
-        stats.totalBytes += parseInt(contentLength.value, 10) || 0;
+        const bytes = parseInt(contentLength.value, 10) || 0;
+        stats.totalBytes += bytes;
+
+        // Update monitoring stats
+        if (monitoringState.enabled && tabId === monitoringState.tabId) {
+          monitoringState.stats.bytesReceived += bytes;
+        }
       }
     }
   },
