@@ -785,36 +785,78 @@ async function getScanHistory(limit = 10) {
 // Extension installation handler
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
-    console.log('Website Security Scanner v2.0 installed');
+    console.log('WebGuard v3.3 installed');
     chrome.storage.local.set({
       installDate: new Date().toISOString(),
       scanCount: 0,
       scanHistory: [],
-      settings: {
-        darkMode: false,
-        realTimeMonitoring: false
+      webguard_settings: {
+        defaultScanType: 'full',
+        autoScan: true,
+        notifications: true,
+        theme: 'dark'
       }
     });
   } else if (details.reason === 'update') {
-    console.log('Website Security Scanner updated to v2.0');
-    // Preserve existing data, add new fields
-    chrome.storage.local.get(null, (data) => {
-      chrome.storage.local.set({
-        ...data,
-        scanHistory: data.scanHistory || [],
-        settings: {
-          darkMode: data.settings?.darkMode || false,
-          realTimeMonitoring: data.settings?.realTimeMonitoring || false
-        }
-      });
+    console.log('WebGuard updated to v3.3');
+    chrome.storage.local.get(['webguard_settings'], (data) => {
+      if (!data.webguard_settings) {
+        chrome.storage.local.set({
+          webguard_settings: {
+            defaultScanType: 'full',
+            autoScan: true,
+            notifications: true,
+            theme: 'dark'
+          }
+        });
+      }
     });
   }
 });
 
-// Handle tab updates to refresh header cache
+// Handle tab updates to perform auto-scans if enabled
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && tab.url) {
-    console.log('Tab loaded:', tab.url);
+  if (changeInfo.status === 'complete' && tab.url && !tab.url.startsWith('chrome://')) {
+    chrome.storage.local.get(['webguard_settings'], async (result) => {
+      const settings = result.webguard_settings || { autoScan: false, defaultScanType: 'full' };
+
+      if (settings.autoScan) {
+        console.log(`Auto-Scan triggered [${settings.defaultScanType}] for: ${tab.url}`);
+
+        try {
+          const response = await fetch(`${CONFIG.API_ENDPOINTS.WEBGUARD_BACKEND}/scan`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: tab.url,
+              scan_type: settings.defaultScanType
+            })
+          });
+
+          const result = await response.json();
+          console.log('Auto-Scan completed:', result.url, 'Status:', result.ml_results?.status_label);
+
+          // Update badge based on risk
+          const score = result.ml_results?.risk_score || 0;
+          const color = score > 70 ? '#ef4444' : score > 40 ? '#f97316' : '#22c55e';
+          chrome.action.setBadgeText({ text: score.toString(), tabId: tabId });
+          chrome.action.setBadgeBackgroundColor({ color, tabId: tabId });
+
+          // Send notification if critical and enabled
+          if (settings.notifications && score > 70) {
+            chrome.notifications.create({
+              type: 'basic',
+              iconUrl: 'icons/icon48.png',
+              title: 'WebGuard Security Alert',
+              message: `High risk detected on ${new URL(tab.url).hostname}. Risk Score: ${score}`,
+              priority: 2
+            });
+          }
+        } catch (error) {
+          console.error('Auto-Scan failed:', error);
+        }
+      }
+    });
   }
 });
 

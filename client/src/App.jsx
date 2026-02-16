@@ -13,8 +13,40 @@ function App() {
     const [scanResults, setScanResults] = useState(null);
     const [isScanning, setIsScanning] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [monitoringActive, setMonitoringActive] = useState(true);
     const [gaugeKey, setGaugeKey] = useState(0);
+    const [settings, setSettings] = useState({
+        defaultScanType: 'full',
+        autoScan: true,
+        notifications: true,
+        theme: 'dark'
+    });
+
+    // Load settings on mount
+    useEffect(() => {
+        const loadSettings = async () => {
+            if (typeof chrome !== 'undefined' && chrome.storage) {
+                chrome.storage.local.get(['webguard_settings'], (result) => {
+                    if (result.webguard_settings) {
+                        setSettings(result.webguard_settings);
+                    }
+                });
+            } else {
+                const saved = localStorage.getItem('webguard_settings');
+                if (saved) setSettings(JSON.parse(saved));
+            }
+        };
+        loadSettings();
+    }, []);
+
+    const updateSetting = (key, value) => {
+        const newSettings = { ...settings, [key]: value };
+        setSettings(newSettings);
+        if (typeof chrome !== 'undefined' && chrome.storage) {
+            chrome.storage.local.set({ webguard_settings: newSettings });
+        } else {
+            localStorage.setItem('webguard_settings', JSON.stringify(newSettings));
+        }
+    };
 
     const restartGaugeAnimation = () => setGaugeKey(prev => prev + 1);
 
@@ -24,7 +56,10 @@ function App() {
 
         try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            const response = await axios.post(`${API_BASE}/scan`, { url: tab.url });
+            const response = await axios.post(`${API_BASE}/scan`, {
+                url: tab.url,
+                scan_type: type
+            });
 
             setProgress(100);
             setScanResults(response.data);
@@ -78,10 +113,13 @@ function App() {
             doc.text(`Risk Score:`, 15, 75);
             doc.text(`${ml.risk_score || 0}/100`, 45, 75);
 
-            doc.text(`Safety Status:`, 15, 85);
+            doc.text(`Scan Mode:`, 15, 85);
+            doc.text(`${(scanResults.ml_results?.scan_type || 'full').toUpperCase()}`, 45, 85);
+
+            doc.text(`Safety Status:`, 15, 95);
             doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
             doc.setFont(undefined, 'bold');
-            doc.text(`${status}`, 45, 85);
+            doc.text(`${status}`, 45, 95);
             doc.setTextColor(0, 0, 0);
             doc.setFont(undefined, 'normal');
 
@@ -161,6 +199,8 @@ function App() {
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                                 transition={{ delay: 0.3 }}
+                                onClick={() => setView('settings')}
+                                style={{ cursor: 'pointer' }}
                             >
                                 <Settings className="settings-icon" size={20} />
                             </motion.div>
@@ -241,8 +281,8 @@ function App() {
                                     </div>
                                 </div>
                                 <div
-                                    className={`toggle ${monitoringActive ? 'active' : ''}`}
-                                    onClick={() => setMonitoringActive(!monitoringActive)}
+                                    className={`toggle ${settings.autoScan ? 'active' : ''}`}
+                                    onClick={() => updateSetting('autoScan', !settings.autoScan)}
                                 >
                                     <div className="toggle-thumb" />
                                 </div>
@@ -336,6 +376,89 @@ function App() {
                                 <span className="lab">Analysis</span>
                             </div>
                         </footer>
+                    </motion.div>
+                )}
+                {view === 'settings' && (
+                    <motion.div
+                        className="settings-view"
+                        initial={{ opacity: 0, x: 50 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -50 }}
+                        transition={{ duration: 0.3 }}
+                    >
+                        <header className="header">
+                            <div className="brand" onClick={() => setView('dashboard')} style={{ cursor: 'pointer' }}>
+                                <ChevronRight style={{ transform: 'rotate(180deg)' }} size={20} />
+                                <span>Settings</span>
+                            </div>
+                        </header>
+
+                        <div className="settings-content">
+                            <div className="settings-group">
+                                <h4 className="group-label">Scan Preferences</h4>
+                                <div className="setting-item">
+                                    <div className="setting-info">
+                                        <div className="setting-name">Default Scan Profile</div>
+                                        <div className="setting-desc">Primary analysis mode for new scans</div>
+                                    </div>
+                                    <select
+                                        className="setting-select"
+                                        value={settings.defaultScanType}
+                                        onChange={(e) => updateSetting('defaultScanType', e.target.value)}
+                                    >
+                                        <option value="quick">Quick Scan</option>
+                                        <option value="full">Full Security Audit</option>
+                                    </select>
+                                </div>
+
+                                <div className="setting-item">
+                                    <div className="setting-info">
+                                        <div className="setting-name">Auto-Protection</div>
+                                        <div className="setting-desc">Automatically scan tabs on change</div>
+                                    </div>
+                                    <div
+                                        className={`toggle ${settings.autoScan ? 'active' : ''}`}
+                                        onClick={() => updateSetting('autoScan', !settings.autoScan)}
+                                    >
+                                        <div className="toggle-thumb" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="settings-group">
+                                <h4 className="group-label">System</h4>
+                                <div className="setting-item">
+                                    <div className="setting-info">
+                                        <div className="setting-name">Critical Alerts</div>
+                                        <div className="setting-desc">Notify on high-risk detections</div>
+                                    </div>
+                                    <div
+                                        className={`toggle ${settings.notifications ? 'active' : ''}`}
+                                        onClick={() => updateSetting('notifications', !settings.notifications)}
+                                    >
+                                        <div className="toggle-thumb" />
+                                    </div>
+                                </div>
+
+                                <div className="setting-item">
+                                    <div className="setting-info">
+                                        <div className="setting-name">Theme Engine</div>
+                                        <div className="setting-desc">Switch between Light and Dark interface</div>
+                                    </div>
+                                    <button
+                                        className="btn btn-secondary btn-small"
+                                        onClick={() => updateSetting('theme', settings.theme === 'dark' ? 'light' : 'dark')}
+                                    >
+                                        {settings.theme.toUpperCase()}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="settings-footer">
+                                <p>WebGuard Engine v3.3.0</p>
+                                <p>AI Intelligence: Active</p>
+                            </div>
+                        </div>
                     </motion.div>
                 )}
             </AnimatePresence>

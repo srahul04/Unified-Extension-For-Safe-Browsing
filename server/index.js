@@ -26,15 +26,15 @@ app.get('/api/health', (req, res) => {
  * Aggregates results from VirusTotal and Python ML Analysis
  */
 app.post('/api/scan', async (req, res) => {
-    const { url } = req.body;
+    const { url, scan_type = 'full' } = req.body;
     if (!url) return res.status(400).json({ error: 'URL is required' });
 
-    console.log(`Scan requested for: ${url}`);
+    console.log(`Scan requested [${scan_type}] for: ${url}`);
 
     try {
         // Parallel requests to analysis services
         const [mlAnalysis, vtAnalysis] = await Promise.allSettled([
-            axios.post(`${PYTHON_SERVICE_URL}/analyze`, { url }),
+            axios.post(`${PYTHON_SERVICE_URL}/analyze`, { url, scan_type }),
             // VirusTotal check could go here, or we delegate to client/extension
             Promise.resolve({ data: { category: 'threat_intelligence', provider: 'vt' } })
         ]);
