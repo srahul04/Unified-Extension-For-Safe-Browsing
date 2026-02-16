@@ -1,8 +1,8 @@
-// Background service worker for handling web requests and API calls
-// Enhanced with comprehensive security analysis capabilities
+import { CONFIG } from './config.js';
 
 // Store headers from web requests
 const headersCache = new Map();
+const vtCache = new Map(); // Global cache for VT results
 
 // Real-Time Monitoring State
 let monitoringState = {
@@ -145,7 +145,53 @@ const MAX_HISTORY_SIZE = 50;
  * Unified message handler for all runtime messages
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Background received action:', request.action, 'for URL:', request.url);
+
   switch (request.action) {
+    case 'performComprehensiveAudit':
+      const url = request.url;
+      // Perform local/fast checks immediately
+      Promise.all([
+        analyzeSecurityHeaders(url),
+        checkCookieSecurity(url),
+        Promise.resolve(checkPhishingIndicators(url)),
+        Promise.resolve(checkLocalMalware(url)),
+        Promise.resolve(checkAdultDomainLogic(url))
+      ]).then(async ([headers, cookies, phishing, malware, adult]) => {
+        // Send immediate results
+        sendResponse({
+          success: true,
+          headers,
+          cookies,
+          phishing,
+          malware,
+          adult,
+          vt_pending: true,
+          timestamp: new Date().toISOString()
+        });
+
+        // 2. Perform VirusTotal analysis in the background (Non-blocking)
+        if (CONFIG.VIRUS_TOTAL_API_KEY) {
+          try {
+            const vtResult = await checkVirusTotalURL(url);
+            if (vtResult) {
+              // Send an update message back to the popup
+              chrome.runtime.sendMessage({
+                action: 'updateVTResults',
+                url: url,
+                vtResult: vtResult
+              }).catch(() => { }); // Popup might be closed
+            }
+          } catch (err) {
+            console.error('VT background analysis error:', err);
+          }
+        }
+      }).catch(err => {
+        console.error('Audit failure:', err);
+        sendResponse({ success: false, error: err.message });
+      });
+      return true;
+
     case 'getHeaders':
       const headers = headersCache.get(request.url) || {};
       sendResponse({ headers });
@@ -154,24 +200,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'analyzeSecurityHeaders':
       analyzeSecurityHeaders(request.url).then(result => {
         sendResponse(result);
-      });
+      }).catch(err => sendResponse({ error: err.message }));
       return true;
 
     case 'checkCookieSecurity':
       checkCookieSecurity(request.url).then(result => {
         sendResponse(result);
-      });
+      }).catch(err => sendResponse({ error: err.message }));
       return true;
 
     case 'checkPhishing':
-      const phishingResult = checkPhishingIndicators(request.url);
-      sendResponse(phishingResult);
-      break;
+      try {
+        const phishingResult = checkPhishingIndicators(request.url);
+        sendResponse(phishingResult);
+      } catch (err) {
+        sendResponse({ error: err.message, isPhishing: false, indicators: [] });
+      }
+      break; // No longer returning true as it is sync
 
     case 'detectTrackers':
-      const trackerResult = detectTrackers(request.resources || []);
-      sendResponse(trackerResult);
-      break;
+      try {
+        const trackerResult = detectTrackers(request.resources || []);
+        sendResponse(trackerResult);
+      } catch (err) {
+        sendResponse({ error: err.message, totalTrackers: 0, trackers: [] });
+      }
+      break; // Sync
 
     case 'incrementScanCount':
       chrome.storage.local.get(['scanCount'], (result) => {
@@ -182,15 +236,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case 'saveScanResult':
-      saveScanResult(request.scanData).then(result => {
-        sendResponse(result);
-      });
+      saveScanResult(request.scanData)
+        .then(result => sendResponse(result))
+        .catch(err => {
+          console.error('Save result failed:', err);
+          sendResponse({ success: false, error: err.message });
+        });
       return true;
 
     case 'getScanHistory':
-      getScanHistory(request.limit || 10).then(history => {
-        sendResponse({ history });
-      });
+      getScanHistory(request.limit || 10)
+        .then(history => sendResponse({ history }))
+        .catch(err => {
+          console.error('History fetch failed:', err);
+          sendResponse({ history: [] });
+        });
       return true;
 
     case 'getNetworkStats':
@@ -204,41 +264,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       break;
 
     case 'checkMalwareDomain':
-      try {
-        const url = new URL(request.url);
-        const isMalware = knownMalwareDomains.some(domain =>
-          url.hostname.includes(domain)
-        );
-        sendResponse({ isMalware, domain: url.hostname });
-      } catch (error) {
-        console.error('Error checking malware domain:', error);
-        sendResponse({ isMalware: false, domain: '', error: error.message });
-      }
+      sendResponse(checkMalwareDomainLogic(request.url));
       break;
 
     case 'checkAdultDomain':
-      try {
-        const url = new URL(request.url);
-        const isAdult = adultContentDomains.some(domain =>
-          url.hostname.includes(domain)
-        );
-        sendResponse({ isAdult, domain: url.hostname });
-      } catch (error) {
-        console.error('Error checking adult domain:', error);
-        sendResponse({ isAdult: false, domain: '', error: error.message });
-      }
+      sendResponse(checkAdultDomainLogic(request.url));
       break;
 
     case 'startMonitoring':
       startMonitoring(request.tabId).then(result => {
         sendResponse(result);
-      });
+      }).catch(err => sendResponse({ error: err.message }));
       return true;
 
     case 'stopMonitoring':
       stopMonitoring().then(result => {
         sendResponse(result);
-      });
+      }).catch(err => sendResponse({ error: err.message }));
       return true;
 
     case 'getMonitoringStats':
@@ -443,6 +485,89 @@ function checkPhishingIndicators(url) {
       severity: 'low',
       error: error.message
     };
+  }
+}
+
+/**
+ * Logic for Malware Domain Check (Local Speed Only)
+ */
+function checkLocalMalware(url) {
+  try {
+    const urlObj = new URL(url);
+    const domain = urlObj.hostname;
+    const isLocalMalware = knownMalwareDomains.some(d => domain.includes(d));
+    return {
+      isMalware: isLocalMalware,
+      domain,
+      source: 'local_database'
+    };
+  } catch (error) {
+    return { isMalware: false, domain: '', error: error.message };
+  }
+}
+
+/**
+ * VirusTotal API Wrapper with Base64URL Encoding
+ */
+async function checkVirusTotalURL(url) {
+  // Check Cache First
+  if (vtCache.has(url)) return vtCache.get(url);
+
+  try {
+    // Proper Base64URL encoding (RFC 4648)
+    // 1. Standard Base64
+    const base64 = btoa(url);
+    // 2. Replace + with -, / with _, and remove = padding
+    const urlBase64URL = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+    const response = await fetch(`${CONFIG.API_ENDPOINTS.VIRUS_TOTAL}${urlBase64URL}`, {
+      method: 'GET',
+      headers: {
+        'x-apikey': CONFIG.VIRUS_TOTAL_API_KEY,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (response.status === 429) {
+      console.warn('VirusTotal API Rate Limit Exceeded');
+      return null;
+    }
+
+    if (!response.ok) throw new Error(`VT API Error: ${response.statusText}`);
+
+    const data = await response.json();
+    const stats = data.data.attributes.last_analysis_stats;
+
+    const result = {
+      malicious: stats.malicious,
+      suspicious: stats.suspicious,
+      harmless: stats.harmless,
+      undetected: stats.undetected,
+      source: 'virustotal'
+    };
+
+    vtCache.set(url, result);
+    return result;
+
+  } catch (error) {
+    console.error('VirusTotal fetch error:', error);
+    return null;
+  }
+}
+
+/**
+ * Logic for Adult Content Check
+ */
+function checkAdultDomainLogic(url) {
+  try {
+    const urlObj = new URL(url);
+    const isAdult = adultContentDomains.some(domain =>
+      urlObj.hostname.includes(domain)
+    );
+    return { isAdult, domain: urlObj.hostname };
+  } catch (error) {
+    console.error('Error checking adult domain:', error);
+    return { isAdult: false, domain: '', error: error.message };
   }
 }
 
@@ -743,10 +868,10 @@ chrome.webRequest.onBeforeRequest.addListener(
             severity: suspiciousCheck.severity
           }).catch(() => { }); // Ignore if popup is closed
 
-          // Block if critical
+          // Log if critical (Blocking requires declarativeNetRequest in MV3)
           if (suspiciousCheck.severity === 'critical') {
             monitoringState.stats.blockedRequests++;
-            return { cancel: true };
+            console.warn('Suspicious activity detected on:', domain);
           }
         }
       }
@@ -762,8 +887,7 @@ chrome.webRequest.onBeforeRequest.addListener(
       }
     }
   },
-  { urls: ["<all_urls>"] },
-  ["blocking"]
+  { urls: ["<all_urls>"] }
 );
 
 chrome.webRequest.onCompleted.addListener(

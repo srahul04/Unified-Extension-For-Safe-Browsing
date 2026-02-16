@@ -1,30 +1,31 @@
 {
   "manifest_version": 3,
   "name": "Website Security Scanner",
-  "version": "2.0.0",
-  "description": "Advanced website security & privacy analysis with real-time monitoring, phishing detection, and comprehensive reporting",
+  "version": "1.0.0",
+  "description": "Comprehensive website security analysis with PDF reporting",
   "permissions": [
     "activeTab",
     "scripting",
     "webRequest",
     "storage",
-    "tabs",
     "alarms",
     "cookies"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "http://localhost:5000/*"
   ],
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "dist/index.html",
     "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
+      "16": "icons/image2.png",
+      "48": "icons/image2.png",
+      "128": "icons/image2.png"
     }
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
