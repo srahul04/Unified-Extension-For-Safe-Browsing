@@ -150,45 +150,62 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.action) {
     case 'performComprehensiveAudit':
       const url = request.url;
-      // Perform local/fast checks immediately
-      Promise.all([
-        analyzeSecurityHeaders(url),
-        checkCookieSecurity(url),
-        Promise.resolve(checkPhishingIndicators(url)),
-        Promise.resolve(checkLocalMalware(url)),
-        Promise.resolve(checkAdultDomainLogic(url))
-      ]).then(async ([headers, cookies, phishing, malware, adult]) => {
-        // Send immediate results
-        sendResponse({
-          success: true,
-          headers,
-          cookies,
-          phishing,
-          malware,
-          adult,
-          vt_pending: true,
-          timestamp: new Date().toISOString()
-        });
-
-        // 2. Perform VirusTotal analysis in the background (Non-blocking)
-        if (CONFIG.VIRUS_TOTAL_API_KEY) {
-          try {
-            const vtResult = await checkVirusTotalURL(url);
-            if (vtResult) {
-              // Send an update message back to the popup
-              chrome.runtime.sendMessage({
-                action: 'updateVTResults',
-                url: url,
-                vtResult: vtResult
-              }).catch(() => { }); // Popup might be closed
-            }
-          } catch (err) {
-            console.error('VT background analysis error:', err);
-          }
+      // Check whitelist
+      chrome.storage.local.get(['webguard_whitelist'], (result) => {
+        const whitelist = result.webguard_whitelist || [];
+        const domain = new URL(url).hostname;
+        if (whitelist.includes(domain)) {
+          console.log(`URL ${url} is whitelisted. Skipping comprehensive audit.`);
+          sendResponse({
+            success: true,
+            whitelisted: true,
+            message: 'Domain is in whitelist'
+          });
+          return;
         }
-      }).catch(err => {
-        console.error('Audit failure:', err);
-        sendResponse({ success: false, error: err.message });
+
+        // Perform local/fast checks immediately
+        Promise.all([
+          analyzeSecurityHeaders(url),
+          checkCookieSecurity(url),
+          Promise.resolve(checkPhishingIndicators(url)),
+          Promise.resolve(checkLocalMalware(url)),
+          Promise.resolve(checkAdultDomainLogic(url)),
+          Promise.resolve(detectTrackers(request.resources || []))
+        ]).then(async ([headers, cookies, phishing, malware, adult, trackers]) => {
+          // Send immediate results
+          sendResponse({
+            success: true,
+            headers,
+            cookies,
+            phishing,
+            malware,
+            adult,
+            trackers,
+            vt_pending: true,
+            timestamp: new Date().toISOString()
+          });
+
+          // 2. Perform VirusTotal analysis in the background (Non-blocking)
+          if (CONFIG.VIRUS_TOTAL_API_KEY) {
+            try {
+              const vtResult = await checkVirusTotalURL(url);
+              if (vtResult) {
+                // Send an update message back to the popup
+                chrome.runtime.sendMessage({
+                  action: 'updateVTResults',
+                  url: url,
+                  vtResult: vtResult
+                }).catch(() => { }); // Popup might be closed
+              }
+            } catch (err) {
+              console.error('VT background analysis error:', err);
+            }
+          }
+        }).catch(err => {
+          console.error('Audit failure:', err);
+          sendResponse({ success: false, error: err.message });
+        });
       });
       return true;
 
@@ -474,7 +491,7 @@ function checkPhishingIndicators(url) {
       isPhishing: riskScore >= 50,
       riskScore: Math.min(riskScore, 100),
       indicators: indicators,
-      severity: riskScore >= 70 ? 'critical' : riskScore >= 50 ? 'high' : riskScore >= 30 ? 'medium' : 'low'
+      severity: riskScore >= 80 ? 'dangerous' : riskScore >= 50 ? 'vulnerable' : riskScore >= 20 ? 'suspicious' : 'secure'
     };
   } catch (error) {
     console.error('Error checking phishing indicators:', error);
@@ -533,7 +550,19 @@ async function checkVirusTotalURL(url) {
       return null;
     }
 
-    if (!response.ok) throw new Error(`VT API Error: ${response.statusText}`);
+    if (response.status === 404) {
+      console.log('URL not found in VirusTotal database, returning empty stats');
+      return {
+        malicious: 0,
+        suspicious: 0,
+        harmless: 0,
+        undetected: 0,
+        source: 'virustotal',
+        not_found: true
+      };
+    }
+
+    if (!response.ok) throw new Error(`VT API Error: ${response.status} ${response.statusText}`);
 
     const data = await response.json();
     const stats = data.data.attributes.last_analysis_stats;
@@ -794,7 +823,8 @@ chrome.runtime.onInstalled.addListener((details) => {
         defaultScanType: 'full',
         autoScan: true,
         notifications: true,
-        theme: 'dark'
+        theme: 'dark',
+        webguard_whitelist: []
       }
     });
   } else if (details.reason === 'update') {

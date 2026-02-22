@@ -115,10 +115,18 @@ function checkSecurityHeaders() {
     }
   });
 
+  const scriptsWithoutIntegrity = Array.from(document.querySelectorAll('script[src]')).filter(s => !s.hasAttribute('integrity'));
+  const linksWithoutIntegrity = Array.from(document.querySelectorAll('link[rel="stylesheet"][href]')).filter(l => !l.hasAttribute('integrity'));
+
   return {
     metaHeaders: headers,
     hasCSPMeta: !!headers['content-security-policy'],
-    missing: headers['content-security-policy'] ? [] : ['Content-Security-Policy']
+    missing: headers['content-security-policy'] ? [] : ['Content-Security-Policy'],
+    localSRI: {
+      scriptsMissing: scriptsWithoutIntegrity.length,
+      linksMissing: linksWithoutIntegrity.length,
+      totalMissing: scriptsWithoutIntegrity.length + linksWithoutIntegrity.length
+    }
   };
 }
 

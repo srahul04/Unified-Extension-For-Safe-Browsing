@@ -230,6 +230,26 @@ function processBackgroundResults(res) {
         severity: (res.cookies?.insecure > 0) ? 'warning' : 'success',
         details: res.cookies?.insecure > 0 ? `${res.cookies.insecure} insecure cookies` : 'Safe'
     });
+
+    // Subresource Integrity (Extra Feature)
+    if (res.extra_security?.sri_percentage !== undefined) {
+        const sri = res.extra_security.sri_percentage;
+        scanResults.checks.push({
+            category: 'Subresource Integrity',
+            severity: sri > 80 ? 'success' : sri > 40 ? 'warning' : 'critical',
+            details: `SRI Protection: ${sri}%`
+        });
+    }
+
+    // CSP Strength (Extra Feature)
+    if (res.extra_security?.csp_grade) {
+        const grade = res.extra_security.csp_grade;
+        scanResults.checks.push({
+            category: 'CSP Strength',
+            severity: grade === 'Strong' ? 'success' : grade === 'Moderate' ? 'warning' : 'critical',
+            details: `Policy Grade: ${grade}`
+        });
+    }
 }
 
 // Timeout & Utility
